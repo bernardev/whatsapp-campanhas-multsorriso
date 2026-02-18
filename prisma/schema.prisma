@@ -1,0 +1,235 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ========== USUÁRIOS ==========
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  campaigns Campaign[]
+  leads     Lead[]
+}
+
+// ========== CAMPANHAS ==========
+model Campaign {
+  id          String         @id @default(cuid())
+  name        String
+  message     String         @db.Text
+  imageUrl    String?                      //URL da imagem
+  scheduledAt DateTime?
+  status      CampaignStatus @default(DRAFT)
+  
+  userId      String
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  contacts    CampaignContact[]
+  messages    Message[]
+  leads       Lead[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+}
+
+// ========== CONTATOS ==========
+model Contact {
+  id          String   @id @default(cuid())
+  phone       String   @unique
+  name        String?
+  company     String?
+  customData  Json?
+  blacklisted Boolean  @default(false)
+  
+  blacklistedAt     DateTime?  // Quando foi bloqueado
+  blacklistReason   String?    // Palavra que triggou (PARE, STOP, etc)
+  blacklistedBy     String?    // "auto" ou ID do usuário que bloqueou manualmente
+  
+  campaigns   CampaignContact[]
+  messages    Message[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([phone])
+  @@index([blacklisted])
+}
+
+// ========== RELAÇÃO CAMPANHA-CONTATO ==========
+model CampaignContact {
+  id         String   @id @default(cuid())
+  campaignId String
+  contactId  String
+  
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact    Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  
+  createdAt  DateTime @default(now())
+  
+  @@unique([campaignId, contactId])
+  @@index([campaignId])
+  @@index([contactId])
+}
+
+// ========== MENSAGENS ==========
+model Message {
+  id          String        @id @default(cuid())
+  campaignId  String
+  contactId   String
+  instanceId  String
+  
+  text        String        @db.Text
+  imageUrl    String?                    // URL da imagem
+  status      MessageStatus @default(PENDING)
+  
+  sentAt      DateTime?
+  deliveredAt DateTime?
+  readAt      DateTime?
+  errorMsg    String?       @db.Text
+  
+  campaign    Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact     Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  instance    WhatsAppInstance @relation(fields: [instanceId], references: [id])
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([campaignId])
+  @@index([contactId])
+  @@index([status])
+  @@index([instanceId])
+}
+
+// ========== INSTÂNCIAS WHATSAPP ==========
+model WhatsAppInstance {
+  id            String   @id @default(cuid())
+  name          String
+  instanceKey   String   @unique
+  phone         String?
+  status        String   @default("disconnected")
+  qrCode        String?  @db.Text
+  isActive      Boolean  @default(true)
+  userId        String?
+  
+  messages      Message[]
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([isActive])
+  @@index([userId])
+  @@index([status])
+}
+
+// ========== HISTÓRICO DE CONVERSAS ==========
+model ConversationMessage {
+  id           String   @id @default(cuid())
+  
+  // Identificação
+  instanceId   String
+  messageId    String   @unique  // ID único da mensagem do WhatsApp
+  remoteJid    String              // Telefone ou grupo (ex: 5541994756035@s.whatsapp.net)
+  
+  // Dados da mensagem
+  fromMe       Boolean             // true = você enviou, false = você recebeu
+  participant  String?             // Usado em grupos para identificar quem enviou
+  pushName     String?             // Nome do contato no WhatsApp
+  messageText  String   @db.Text   // Texto da mensagem
+  messageType  String              // conversation, image, video, etc
+  imageUrl     String?             // URL da imagem
+  
+  // Metadados
+  timestamp    DateTime            // Quando a mensagem foi enviada
+  source       String?             // web, ios, android
+  
+  createdAt    DateTime @default(now())
+
+  @@index([instanceId, remoteJid, timestamp])
+  @@index([remoteJid])
+  @@index([timestamp])
+  @@map("conversation_messages")
+}
+
+// ========== CONTROLE DE RESPOSTAS ==========
+model ConversationResponse {
+  id                String   @id @default(cuid())
+  remoteJid         String
+  needsResponse     Boolean  @default(true)
+  notificationRead  Boolean  @default(false)
+  lastMessageAt     DateTime
+  respondedAt       DateTime?
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([remoteJid])
+  @@index([needsResponse])
+  @@index([notificationRead])
+  @@index([lastMessageAt])
+  @@map("conversation_responses")
+}
+
+// ========== LEADS ==========
+model Lead {
+  id              String      @id @default(cuid())
+  remoteJid       String      @unique
+  
+  status          LeadStatus  @default(NOVO)
+  isHot           Boolean     @default(false)
+  
+  campaignId      String?
+  campaign        Campaign?   @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  
+  assignedToUserId String?
+  assignedTo      User?       @relation(fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  
+  notes           String?     @db.Text
+  
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  
+  @@index([status])
+  @@index([isHot])
+  @@index([assignedToUserId])
+  @@index([campaignId])
+  @@map("leads")
+}
+
+enum LeadStatus {
+  NOVO
+  EM_ATENDIMENTO
+  FINALIZADO
+}
+
+// ========== ENUMS ==========
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum MessageStatus {
+  PENDING
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
