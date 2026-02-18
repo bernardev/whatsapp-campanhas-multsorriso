@@ -1,11 +1,13 @@
 // lib/redis.ts
 import { Redis } from 'ioredis'
+import 'dotenv/config'
 
-const redis = new Redis({
-  host: process.env.REDIS_HOST,
-  port: parseInt(process.env.REDIS_PORT || '6379'),
-  password: process.env.REDIS_PASSWORD || undefined,
+console.log('[Redis] Connecting to:', process.env.REDIS_URL)
+const redis = new Redis(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
+  tls: {
+    rejectUnauthorized: false
+  }
 })
 
 redis.on('error', (err) => {
