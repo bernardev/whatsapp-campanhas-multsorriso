@@ -24,12 +24,12 @@ import {
   Check,
   Smartphone
 } from 'lucide-react'
-import { CampaignStatus } from '@/types/campaign'
+import { MessageStatus as PrismaMessageStatus, CampaignStatus } from '@prisma/client'
 
 type MessageStatus = 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED'
 
 interface Message {
-  status: MessageStatus
+  status: PrismaMessageStatus
 }
 
 interface Campaign {

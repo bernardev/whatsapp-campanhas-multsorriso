@@ -1,9 +1,21 @@
 // types/campaign.ts
-import { MessageStatus as PrismaMessageStatus, CampaignStatus as PrismaCampaignStatus } from '@prisma/client'
 
-// Usa os tipos do Prisma diretamente
-export type MessageStatus = PrismaMessageStatus
-export type CampaignStatus = PrismaCampaignStatus
+export type CampaignStatus = 
+  | 'DRAFT' 
+  | 'SCHEDULED' 
+  | 'RUNNING' 
+  | 'PAUSED' 
+  | 'COMPLETED' 
+  | 'CANCELLED'
+
+export type MessageStatus = 
+  | 'PENDING'
+  | 'QUEUED'
+  | 'SENDING'
+  | 'SENT'
+  | 'DELIVERED'
+  | 'READ'
+  | 'FAILED'
 
 export interface Campaign {
   id: string
