@@ -36,27 +36,70 @@ export async function POST(
       )
     }
 
-    const response = await axios.get(
+    console.log('[QRCode] Tentando conectar instância:', instance.instanceKey)
+
+    // Tenta conectar (isso gera o QR Code se necessário)
+    const connectResponse = await axios.get(
       `${EVOLUTION_URL}/instance/connect/${instance.instanceKey}`,
       {
-        headers: { 'apikey': EVOLUTION_KEY }
+        headers: { 'apikey': EVOLUTION_KEY },
+        timeout: 30000
       }
     )
 
-    const qrCode = response.data?.qrcode?.base64 || response.data?.base64 || null
+    console.log('[QRCode] Resposta da Evolution:', connectResponse.data)
+
+    // Tenta diferentes formatos de resposta
+    let qrCode = null
+    
+    if (connectResponse.data?.qrcode?.base64) {
+      qrCode = connectResponse.data.qrcode.base64
+    } else if (connectResponse.data?.base64) {
+      qrCode = connectResponse.data.base64
+    } else if (connectResponse.data?.pairingCode) {
+      // Se for pairing code ao invés de QR
+      console.log('[QRCode] Pairing code:', connectResponse.data.pairingCode)
+    }
+
+    // Se não retornou QR Code, busca da instância
+    if (!qrCode && connectResponse.data?.count === 0) {
+      console.log('[QRCode] Nenhum QR Code gerado ainda, tentando buscar...')
+      
+      // Aguarda 2 segundos e tenta novamente
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      
+      const retryResponse = await axios.get(
+        `${EVOLUTION_URL}/instance/connect/${instance.instanceKey}`,
+        {
+          headers: { 'apikey': EVOLUTION_KEY }
+        }
+      )
+      
+      if (retryResponse.data?.qrcode?.base64) {
+        qrCode = retryResponse.data.qrcode.base64
+      }
+    }
 
     if (qrCode) {
       await prisma.whatsAppInstance.update({
         where: { id },
-        data: { qrCode }
+        data: { 
+          qrCode,
+          status: 'connecting'
+        }
       })
+      
+      console.log('[QRCode] QR Code gerado e salvo!')
+      return NextResponse.json({ qrCode })
     }
 
-    console.log('[Instances] QR Code atualizado:', instance.instanceKey)
-
-    return NextResponse.json({ qrCode })
+    console.log('[QRCode] Nenhum QR Code disponível')
+    return NextResponse.json(
+      { error: 'QR Code não disponível. Tente novamente em alguns segundos.' },
+      { status: 400 }
+    )
   } catch (error) {
-    console.error('[Instances] Erro ao gerar QR Code:', error)
+    console.error('[QRCode] Erro:', error)
     return NextResponse.json(
       { error: 'Erro ao gerar QR Code' },
       { status: 500 }

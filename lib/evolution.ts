@@ -47,7 +47,9 @@ export async function sendImageMessage(
   console.log(`[Evolution] Usando instância: ${instanceKey}`)
   
   try {
-    const publicUrl = `https://b399-2804-7f4-323a-dd4a-911d-30e2-df2d-d756.ngrok-free.app${imageUrl}`
+        const publicUrl = imageUrl.startsWith('http') 
+      ? imageUrl 
+      : `https://b399-2804-7f4-323a-dd4a-911d-30e2-df2d-d756.ngrok-free.app${imageUrl}`
     
     console.log(`[Evolution] Enviando imagem: ${publicUrl}`)
 
