@@ -79,7 +79,7 @@ export async function POST(
     try {
       await prisma.conversationMessage.create({
         data: {
-          instanceId: instanceName,
+          instanceId: instance.id,
           messageId: messageId,
           remoteJid: remoteJid,
           fromMe: true,

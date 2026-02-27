@@ -2,8 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { MessageStatus } from '@prisma/client'
-
-// ========== TIPOS DO WEBHOOK ==========
+import { redisPub, EVENTS_CHANNEL } from '@/lib/redis-pubsub'
 
 interface WebhookBody {
   event: string
@@ -20,12 +19,8 @@ interface WebhookData {
   }
   message?: {
     conversation?: string
-    extendedTextMessage?: {
-      text?: string
-    }
-    imageMessage?: {
-      caption?: string
-    }
+    extendedTextMessage?: { text?: string }
+    imageMessage?: { caption?: string }
   }
   messageType?: string
   messageTimestamp?: number
@@ -42,50 +37,26 @@ interface MessageUpdateData {
   errorMsg?: string
 }
 
-// ========== CRIAR/ATUALIZAR LEAD AUTOMATICAMENTE ==========
 async function createOrUpdateLead(remoteJid: string): Promise<void> {
   try {
     if (remoteJid.includes('status@broadcast')) return
-    
+
     const phone = remoteJid
       .replace('@s.whatsapp.net', '')
       .replace('@g.us', '')
       .replace(/\D/g, '')
-    
-    console.log(`[Lead] Buscando campanha para telefone: ${phone}`)
-    
-    const phoneVariations = [
-      phone,
-      phone.slice(0, 4) + '9' + phone.slice(4)
-    ]
-    
-    console.log(`[Lead] Variações de busca: ${phoneVariations.join(', ')}`)
-    
+
+    const phoneVariations = [phone, phone.slice(0, 4) + '9' + phone.slice(4)]
+
     const lastCampaignMessage = await prisma.message.findFirst({
-      where: { 
-        contact: { 
-          phone: {
-            in: phoneVariations
-          }
-        }
-      },
+      where: { contact: { phone: { in: phoneVariations } } },
       orderBy: { createdAt: 'desc' },
-      select: { 
+      select: {
         campaignId: true,
-        campaign: {
-          select: {
-            name: true
-          }
-        }
+        campaign: { select: { name: true } }
       }
     })
-    
-    if (lastCampaignMessage) {
-      console.log(`[Lead] Campanha encontrada: ${lastCampaignMessage.campaign.name}`)
-    } else {
-      console.log(`[Lead] Nenhuma campanha encontrada para ${phone}`)
-    }
-    
+
     await prisma.lead.upsert({
       where: { remoteJid },
       create: {
@@ -96,27 +67,26 @@ async function createOrUpdateLead(remoteJid: string): Promise<void> {
       },
       update: {
         updatedAt: new Date(),
-        ...(lastCampaignMessage?.campaignId && { campaignId: lastCampaignMessage.campaignId })
+        ...(lastCampaignMessage?.campaignId && {
+          campaignId: lastCampaignMessage.campaignId
+        })
       }
     })
-    
+
     console.log(`[Lead] Criado/Atualizado: ${remoteJid}${lastCampaignMessage ? ` → Campanha: ${lastCampaignMessage.campaign.name}` : ' (sem campanha)'}`)
   } catch (error) {
     console.error('[Lead] Erro ao criar/atualizar:', error)
   }
 }
 
-// ========== HANDLER PRINCIPAL ==========
-
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = await request.json() as WebhookBody
-    
-    // Ignora instâncias antigas
+
     if (body.instance === 'teste-eduardo') {
       return NextResponse.json({ success: true })
     }
-    
+
     console.log('[Webhook] Recebido:', JSON.stringify(body, null, 2))
 
     const { event, instance, data } = body
@@ -144,14 +114,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('[Webhook] Erro:', error)
-    return NextResponse.json(
-      { error: 'Erro ao processar webhook' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: 'Erro ao processar webhook' }, { status: 500 })
   }
 }
-
-// ========== SALVA TUDO NO HISTÓRICO ==========
 
 async function saveToConversationHistory(
   data: WebhookData,
@@ -172,32 +137,31 @@ async function saveToConversationHistory(
       return
     }
 
-    const messageText = data.message?.conversation || 
-                       data.message?.extendedTextMessage?.text ||
-                       data.message?.imageMessage?.caption ||
-                       '[Mídia ou mensagem não suportada]'
+    const messageText =
+      data.message?.conversation ||
+      data.message?.extendedTextMessage?.text ||
+      data.message?.imageMessage?.caption ||
+      '[Mídia ou mensagem não suportada]'
 
     let imageUrl: string | null = null
-    if (messageType === 'imageMessage' && data.message?.imageMessage) {
-      if (fromMe) {
-        const phone = remoteJid
-          .replace('@s.whatsapp.net', '')
-          .replace('@g.us', '')
-          .replace(/\D/g, '')
-        
-        const sentMessage = await prisma.message.findFirst({
-          where: {
-            contact: { phone },
-            instanceId: instance,
-            imageUrl: { not: null }
-          },
-          orderBy: { createdAt: 'desc' },
-          select: { imageUrl: true }
-        })
-        
-        if (sentMessage?.imageUrl) {
-          imageUrl = sentMessage.imageUrl
-        }
+    if (messageType === 'imageMessage' && data.message?.imageMessage && fromMe) {
+      const phone = remoteJid
+        .replace('@s.whatsapp.net', '')
+        .replace('@g.us', '')
+        .replace(/\D/g, '')
+
+      const sentMessage = await prisma.message.findFirst({
+        where: {
+          contact: { phone },
+          instanceId: instance,
+          imageUrl: { not: null }
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { imageUrl: true }
+      })
+
+      if (sentMessage?.imageUrl) {
+        imageUrl = sentMessage.imageUrl
       }
     }
 
@@ -226,10 +190,11 @@ async function saveToConversationHistory(
       }
     })
 
-    console.log(`[History] Salvo: ${fromMe ? 'Você' : pushName || 'Contato'} → "${messageText.substring(0, 50)}"${imageUrl ? ' (imagem)' : ''}`)
+    console.log(`[History] Salvo: ${fromMe ? 'Você' : pushName || 'Contato'} → "${messageText.substring(0, 50)}"`)
 
     await createOrUpdateLead(remoteJid)
-    
+
+    // Atualiza status de resposta — apenas para mensagens recebidas
     if (!fromMe) {
       await prisma.conversationResponse.upsert({
         where: { remoteJid },
@@ -246,18 +211,28 @@ async function saveToConversationHistory(
           updatedAt: new Date()
         }
       })
-      console.log(`[Response] Marcado como aguardando resposta: ${remoteJid}`)
     }
-    
+
+    // Publica evento SSE via Redis — sempre, para qualquer mensagem
+    const evento = {
+      tipo: fromMe ? 'mensagem_enviada' : 'nova_mensagem',
+      remoteJid,
+      pushName: pushName || null,
+      messageText: messageText.substring(0, 100),
+      fromMe,
+      timestamp: new Date(timestamp * 1000).toISOString()
+    }
+
+    await redisPub.publish(EVENTS_CHANNEL, JSON.stringify(evento))
+    console.log(`[SSE] Evento publicado: ${evento.tipo} → ${remoteJid}`)
+
   } catch (error) {
     console.error('[History] Erro ao salvar:', error)
   }
 }
 
-// ========== ATUALIZA STATUS (ENTREGUE, LIDA, ERRO) ==========
-
 async function handleMessageStatusUpdate(
-  data: WebhookData, 
+  data: WebhookData,
   instance: string
 ): Promise<void> {
   try {
@@ -327,10 +302,8 @@ async function handleMessageStatusUpdate(
   }
 }
 
-// ========== CONFIRMA MENSAGEM ENVIADA ==========
-
 async function handleMessageSent(
-  data: WebhookData, 
+  data: WebhookData,
   instance: string
 ): Promise<void> {
   try {
@@ -353,10 +326,7 @@ async function handleMessageSent(
     if (message) {
       await prisma.message.update({
         where: { id: message.id },
-        data: {
-          status: 'SENT',
-          sentAt: new Date()
-        }
+        data: { status: 'SENT', sentAt: new Date() }
       })
       console.log(`[Webhook] Mensagem confirmada: ${message.id}`)
     }
@@ -365,27 +335,25 @@ async function handleMessageSent(
   }
 }
 
-// ========== PROCESSA MENSAGEM RECEBIDA (RESPOSTA) ==========
-
 async function handleIncomingMessage(
-  data: WebhookData, 
+  data: WebhookData,
   instance: string
 ): Promise<void> {
   try {
     const remoteJid = data.key?.remoteJid?.replace('@s.whatsapp.net', '')
     const pushName = data.pushName
-    
-    const messageText = data.message?.conversation || 
-                        data.message?.extendedTextMessage?.text || ''
+
+    const messageText =
+      data.message?.conversation ||
+      data.message?.extendedTextMessage?.text ||
+      ''
 
     if (!remoteJid || !messageText) return
 
     const phone = remoteJid.replace(/\D/g, '')
     console.log(`[Webhook] Resposta recebida de ${phone}: "${messageText}"`)
 
-    const contact = await prisma.contact.findFirst({
-      where: { phone }
-    })
+    const contact = await prisma.contact.findFirst({ where: { phone } })
 
     if (!contact) {
       console.log(`[Webhook] Contato não está na base`)
@@ -399,19 +367,19 @@ async function handleIncomingMessage(
       })
     }
 
-    const blacklistWords: string[] = ['PARE', 'STOP', 'REMOVER', 'SAIR', 'CANCELAR']
-    const detectedWord = blacklistWords.find((word: string) => 
+    const blacklistWords = ['PARE', 'STOP', 'REMOVER', 'SAIR', 'CANCELAR']
+    const detectedWord = blacklistWords.find((word) =>
       messageText.toUpperCase().includes(word)
     )
 
     if (detectedWord) {
       await prisma.contact.update({
         where: { id: contact.id },
-        data: { 
+        data: {
           blacklisted: true,
-          blacklistedAt: new Date(), 
+          blacklistedAt: new Date(),
           blacklistReason: detectedWord,
-          blacklistedBy: 'auto' 
+          blacklistedBy: 'auto'
         }
       })
       console.log(`[Webhook] Contato bloqueado: ${phone} (palavra: ${detectedWord})`)
@@ -427,15 +395,10 @@ async function handleOutgoingMessage(
 ): Promise<void> {
   try {
     const remoteJid = data.key?.remoteJid
-    
     if (!remoteJid) return
 
-    // Quando VOCÊ envia, marca a conversa como respondida
     await prisma.conversationResponse.updateMany({
-      where: {
-        remoteJid,
-        needsResponse: true
-      },
+      where: { remoteJid, needsResponse: true },
       data: {
         needsResponse: false,
         notificationRead: true,
@@ -448,8 +411,6 @@ async function handleOutgoingMessage(
     console.error('[Webhook] Erro ao processar envio:', error)
   }
 }
-
-// ========== ATUALIZA CONTADORES DA CAMPANHA ==========
 
 async function updateCampaignCounters(campaignId: string): Promise<void> {
   try {
@@ -476,10 +437,8 @@ async function updateCampaignCounters(campaignId: string): Promise<void> {
 
     let newStatus = campaign.status
 
-    if (stats.pending === 0 && stats.total > 0) {
-      if (campaign.status === 'RUNNING') {
-        newStatus = 'COMPLETED'
-      }
+    if (stats.pending === 0 && stats.total > 0 && campaign.status === 'RUNNING') {
+      newStatus = 'COMPLETED'
     }
 
     if (newStatus !== campaign.status) {

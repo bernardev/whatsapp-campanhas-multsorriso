@@ -1,10 +1,9 @@
 // app/(dashboard)/conversas/page.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
 import { 
   MessageSquare, 
   Search,
@@ -15,7 +14,6 @@ import {
   Clock,
   AlertCircle,
   X,
-  Check
 } from 'lucide-react'
 
 interface Message {
@@ -40,6 +38,68 @@ interface Conversa {
 
 type FilterType = 'all' | 'pending' | 'responded'
 
+const MessageInput = memo(({ 
+  onSend, 
+  disabled 
+}: { 
+  onSend: (msg: string) => Promise<void>
+  disabled: boolean 
+}) => {
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+
+  async function handleSend() {
+    if (!input.trim() || sending) return
+    setSending(true)
+    await onSend(input.trim())
+    setInput('')
+    setSending(false)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  return (
+    <div className="flex-shrink-0 bg-white border-t border-slate-200 p-4">
+      <div className="flex gap-3 items-end">
+        <textarea
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Digite sua mensagem... (Enter para enviar, Shift+Enter para quebrar linha)"
+          disabled={disabled || sending}
+          rows={1}
+          className="flex-1 resize-none px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#BD8F29] focus:border-transparent text-sm transition-all disabled:bg-slate-100 disabled:cursor-not-allowed"
+          style={{
+            minHeight: '48px',
+            maxHeight: '120px',
+            overflowY: input.split('\n').length > 3 ? 'auto' : 'hidden'
+          }}
+        />
+        <Button
+          onClick={handleSend}
+          disabled={!input.trim() || sending || disabled}
+          className="bg-[#BD8F29] hover:bg-[#BD8F29]/90 text-white px-6 py-3 h-12"
+        >
+          {sending ? (
+            <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <span className="font-semibold">Enviar</span>
+          )}
+        </Button>
+      </div>
+      <p className="text-xs text-slate-500 mt-2">
+        💡 Dica: Pressione Enter para enviar ou Shift+Enter para quebrar linha
+      </p>
+    </div>
+  )
+})
+MessageInput.displayName = 'MessageInput'
+
 export default function ConversasPage() {
   const router = useRouter()
   const [conversas, setConversas] = useState<Conversa[]>([])
@@ -50,37 +110,92 @@ export default function ConversasPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [messageInput, setMessageInput] = useState('')
   const [sendingMessage, setSendingMessage] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+  const [syncResult, setSyncResult] = useState<string | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [loadingMessages, setLoadingMessages] = useState(false)
+
+  const selectedConversaRef = useRef<Conversa | null>(null)
+  const messagesRef = useRef<Message[]>([])
+
+  async function syncConversas() {
+    try {
+      setSyncing(true)
+      setSyncResult(null)
+
+      const response = await fetch('/api/conversas/sync', { method: 'POST' })
+      const data = await response.json()
+
+      if (!response.ok) throw new Error(data.error)
+
+      setSyncResult(data.message)
+      await loadConversas(true)
+    } catch (error) {
+      console.error('Erro no sync:', error)
+      setSyncResult('Erro ao sincronizar. Verifique a instância.')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   useEffect(() => {
     loadConversas()
-    
-    // Auto-refresh a cada 10 segundos
+
     const interval = setInterval(() => {
       loadConversas(true)
-    }, 10000)
+      if (selectedConversaRef.current) {
+        loadMessages(selectedConversaRef.current.remoteJid, true)
+      }
+    }, 5000)
 
     return () => clearInterval(interval)
   }, [])
 
+  async function loadMessages(remoteJid: string, silent = false) {
+    try {
+      if (!silent) {
+        setLoadingMessages(true)
+        setMessages([])
+        messagesRef.current = []
+      }
+
+      const response = await fetch(
+        `/api/conversas/${encodeURIComponent(remoteJid)}/mensagens`
+      )
+      const data = await response.json()
+
+      if (response.ok) {
+        // Só atualiza estado se quantidade de mensagens mudou
+        if (data.mensagens.length !== messagesRef.current.length) {
+          messagesRef.current = data.mensagens
+          setMessages(data.mensagens)
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao carregar mensagens:', error)
+    } finally {
+      if (!silent) setLoadingMessages(false)
+    }
+  }
+
   async function loadConversas(silent = false) {
     try {
       if (!silent) setLoading(true)
-      
+
       const response = await fetch('/api/conversas')
       const data = await response.json()
       setConversas(data.conversas)
 
-      // Atualiza conversa selecionada se existir
-      if (selectedConversa) {
+      if (selectedConversaRef.current) {
         const updated = data.conversas.find(
-          (c: Conversa) => c.remoteJid === selectedConversa.remoteJid
+          (c: Conversa) => c.remoteJid === selectedConversaRef.current!.remoteJid
         )
         if (updated) setSelectedConversa(updated)
       }
     } catch (error) {
       console.error('Erro ao carregar conversas:', error)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }
 
@@ -88,10 +203,11 @@ export default function ConversasPage() {
     try {
       setActionLoading(remoteJid)
 
-      const method = needsResponse ? 'DELETE' : 'POST'
-      const response = await fetch(`/api/conversas/${encodeURIComponent(remoteJid)}/marcar-respondido`, {
-        method
-      })
+      const method = needsResponse ? 'POST' : 'DELETE'
+      const response = await fetch(
+        `/api/conversas/${encodeURIComponent(remoteJid)}/marcar-respondido`,
+        { method }
+      )
 
       if (!response.ok) throw new Error('Erro ao atualizar status')
 
@@ -105,35 +221,31 @@ export default function ConversasPage() {
   }
 
   async function sendMessage() {
-  if (!selectedConversa || !messageInput.trim()) return
+    if (!selectedConversa || !messageInput.trim()) return
 
-  try {
-    setSendingMessage(true)
+    try {
+      setSendingMessage(true)
 
-    const response = await fetch(
-      `/api/conversas/${encodeURIComponent(selectedConversa.remoteJid)}/enviar`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: messageInput.trim() })
-      }
-    )
+      const response = await fetch(
+        `/api/conversas/${encodeURIComponent(selectedConversa.remoteJid)}/enviar`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: messageInput.trim() })
+        }
+      )
 
-    if (!response.ok) throw new Error('Erro ao enviar')
+      if (!response.ok) throw new Error('Erro ao enviar')
 
-    // Limpa input
-    setMessageInput('')
-    
-    // Recarrega conversas
-    await loadConversas(true)
-    
-    // Scroll para o fim
-    setTimeout(() => {
-      const messagesDiv = document.querySelector('.messages-container')
-      if (messagesDiv) {
-        messagesDiv.scrollTop = messagesDiv.scrollHeight
-      }
-    }, 100)
+      setMessageInput('')
+      await loadMessages(selectedConversa.remoteJid, true)
+
+      setTimeout(() => {
+        const messagesDiv = document.querySelector('.messages-container')
+        if (messagesDiv) {
+          messagesDiv.scrollTop = messagesDiv.scrollHeight
+        }
+      }, 100)
     } catch (error) {
       console.error('Erro ao enviar mensagem:', error)
       alert('Erro ao enviar mensagem. Tente novamente.')
@@ -142,20 +254,18 @@ export default function ConversasPage() {
     }
   }
 
-function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault()
-    sendMessage()
+  function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessage()
+    }
   }
-}
 
   const filteredConversas = conversas
     .filter(conv => {
-      // Filtro de status
       if (filterType === 'pending' && !conv.needsResponse) return false
       if (filterType === 'responded' && conv.needsResponse) return false
-      
-      // Filtro de busca
+
       if (searchTerm) {
         const search = searchTerm.toLowerCase()
         return (
@@ -164,14 +274,12 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
           conv.lastMessage.toLowerCase().includes(search)
         )
       }
-      
+
       return true
     })
     .sort((a, b) => {
-      // Prioriza conversas que precisam de resposta
       if (a.needsResponse && !b.needsResponse) return -1
       if (!a.needsResponse && b.needsResponse) return 1
-      // Depois ordena por data
       return new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime()
     })
 
@@ -189,11 +297,11 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50 flex">
+    <div className="h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-white to-slate-50 flex">
       {/* Sidebar - Lista de conversas */}
-      <div className={`${selectedConversa ? 'hidden md:flex' : 'w-full'} md:w-[420px] bg-white border-r border-slate-200 flex-col shadow-lg`}>
-        {/* Header */}
-        <div className="p-6 border-b border-slate-200 bg-gradient-to-br from-white to-slate-50/30">
+      <div className={`${selectedConversa ? 'hidden md:flex' : 'flex w-full'} md:w-[420px] bg-white border-r border-slate-200 flex-col shadow-lg h-full`}>
+        {/* Header fixo */}
+        <div className="flex-shrink-0 p-6 border-b border-slate-200 bg-gradient-to-br from-white to-slate-50/30">
           <div className="flex items-center gap-3 mb-4">
             <Button
               variant="ghost"
@@ -215,6 +323,29 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
                     {pendingCount} aguardando resposta
                   </span>
                 </p>
+              )}
+            </div>
+
+            {/* Botão Sincronizar */}
+            <div className="mb-4">
+              <Button
+                onClick={syncConversas}
+                disabled={syncing}
+                variant="outline"
+                size="sm"
+                className="w-full border-[#BD8F29] text-[#BD8F29] hover:bg-[#BD8F29]/10"
+              >
+                {syncing ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-[#BD8F29] border-t-transparent rounded-full animate-spin mr-2" />
+                    Sincronizando...
+                  </>
+                ) : (
+                  'Sincronizar conversas do WhatsApp'
+                )}
+              </Button>
+              {syncResult && (
+                <p className="text-xs text-center mt-1.5 text-slate-500">{syncResult}</p>
               )}
             </div>
           </div>
@@ -260,7 +391,7 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
           </div>
         </div>
 
-        {/* Lista de conversas */}
+        {/* Lista de conversas com scroll próprio */}
         <div className="flex-1 overflow-y-auto">
           {filteredConversas.length === 0 ? (
             <div className="p-8 text-center">
@@ -273,17 +404,22 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
             filteredConversas.map((conversa) => (
               <div
                 key={conversa.remoteJid}
-                onClick={() => setSelectedConversa(conversa)}
+                onClick={() => {
+                  setSelectedConversa(conversa)
+                  selectedConversaRef.current = conversa
+                  loadMessages(conversa.remoteJid)
+                }}
                 className={`p-4 border-b border-slate-100 hover:bg-slate-50 cursor-pointer transition-all ${
-                  selectedConversa?.remoteJid === conversa.remoteJid ? 'bg-[#BD8F29]/5 border-l-4 border-l-[#BD8F29]' : ''
+                  selectedConversa?.remoteJid === conversa.remoteJid
+                    ? 'bg-[#BD8F29]/5 border-l-4 border-l-[#BD8F29]'
+                    : ''
                 } ${conversa.needsResponse ? 'bg-red-50/30' : ''}`}
               >
                 <div className="flex items-start gap-3">
-                  {/* Avatar */}
                   <div className="flex-shrink-0 relative">
                     <div className={`w-12 h-12 rounded-full flex items-center justify-center text-white font-bold ${
-                      conversa.needsResponse 
-                        ? 'bg-gradient-to-br from-red-500 to-red-600' 
+                      conversa.needsResponse
+                        ? 'bg-gradient-to-br from-red-500 to-red-600'
                         : 'bg-gradient-to-br from-[#BD8F29] to-[#BD8F29]/80'
                     }`}>
                       {conversa.isGroup ? (
@@ -299,7 +435,6 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
                     )}
                   </div>
 
-                  {/* Conteúdo */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between mb-1">
                       <div className="flex-1 min-w-0">
@@ -342,11 +477,11 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
       </div>
 
       {/* Área de mensagens */}
-      <div className="flex-1 flex flex-col bg-gradient-to-br from-slate-50 to-white">
+      <div className="flex-1 flex flex-col h-full overflow-hidden bg-gradient-to-br from-slate-50 to-white">
         {selectedConversa ? (
           <>
-            {/* Header da conversa */}
-            <div className="bg-white border-b border-slate-200 p-4 shadow-sm">
+            {/* Header fixo */}
+            <div className="flex-shrink-0 bg-white border-b border-slate-200 p-4 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <Button
@@ -358,8 +493,8 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
                     <ArrowLeft className="w-4 h-4" />
                   </Button>
                   <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold ${
-                    selectedConversa.needsResponse 
-                      ? 'bg-gradient-to-br from-red-500 to-red-600' 
+                    selectedConversa.needsResponse
+                      ? 'bg-gradient-to-br from-red-500 to-red-600'
                       : 'bg-gradient-to-br from-[#BD8F29] to-[#BD8F29]/80'
                   }`}>
                     {selectedConversa.isGroup ? (
@@ -379,14 +514,13 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
                   </div>
                 </div>
 
-                {/* Botão marcar como respondido */}
                 <Button
                   size="sm"
                   variant={selectedConversa.needsResponse ? 'default' : 'outline'}
                   onClick={() => toggleResponseStatus(selectedConversa.remoteJid, selectedConversa.needsResponse)}
                   disabled={actionLoading === selectedConversa.remoteJid}
-                  className={selectedConversa.needsResponse 
-                    ? 'bg-emerald-600 hover:bg-emerald-700' 
+                  className={selectedConversa.needsResponse
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
                     : 'border-slate-300'
                   }
                 >
@@ -407,73 +541,65 @@ function handleKeyPress(e: React.KeyboardEvent<HTMLTextAreaElement>) {
               </div>
             </div>
 
-            {/* Mensagens */}
+            {/* Mensagens com scroll próprio */}
             <div className="flex-1 overflow-y-auto p-6 space-y-3 messages-container">
-              {selectedConversa.messages.slice().reverse().map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[70%] rounded-2xl px-4 py-3 shadow-sm ${
-                      msg.fromMe
-                        ? 'bg-gradient-to-br from-[#BD8F29] to-[#BD8F29]/90 text-white'
-                        : 'bg-white text-slate-900 border border-slate-200'
-                    }`}
-                  >
-                    {!msg.fromMe && msg.pushName && (
-                      <p className="text-xs font-semibold mb-1.5 text-[#BD8F29]">
-                        {msg.pushName}
-                      </p>
-                    )}
-                    <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
-                      {msg.messageText}
-                    </p>
-                    <p
-                      className={`text-xs mt-1.5 flex items-center gap-1 ${
-                        msg.fromMe ? 'text-white/80' : 'text-slate-500'
-                      }`}
-                    >
-                      {formatTime(msg.timestamp)}
-                    </p>
+              {loadingMessages ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#BD8F29] mx-auto mb-2" />
+                    <p className="text-sm text-slate-500">Carregando mensagens...</p>
                   </div>
                 </div>
-              ))}
+              ) : messages.length === 0 ? (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-sm text-slate-400">Nenhuma mensagem encontrada</p>
+                </div>
+              ) : (
+                messages.slice().reverse().map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex ${msg.fromMe ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[70%] rounded-2xl px-4 py-3 shadow-sm ${
+                        msg.fromMe
+                          ? 'bg-gradient-to-br from-[#BD8F29] to-[#BD8F29]/90 text-white'
+                          : 'bg-white text-slate-900 border border-slate-200'
+                      }`}
+                    >
+                      {!msg.fromMe && msg.pushName && (
+                        <p className="text-xs font-semibold mb-1.5 text-[#BD8F29]">
+                          {msg.pushName}
+                        </p>
+                      )}
+                      <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                        {msg.messageText}
+                      </p>
+                      <p className={`text-xs mt-1.5 ${msg.fromMe ? 'text-white/80' : 'text-slate-500'}`}>
+                        {formatTime(msg.timestamp)}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
 
-            {/* Footer */}
-            <div className="bg-white border-t border-slate-200 p-4">
-              <div className="flex gap-3 items-end">
-                <textarea
-                  value={messageInput}
-                  onChange={(e) => setMessageInput(e.target.value)}
-                  onKeyDown={handleKeyPress}
-                  placeholder="Digite sua mensagem... (Enter para enviar, Shift+Enter para quebrar linha)"
-                  disabled={sendingMessage}
-                  rows={1}
-                  className="flex-1 resize-none px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-[#BD8F29] focus:border-transparent text-sm transition-all disabled:bg-slate-100 disabled:cursor-not-allowed"
-                  style={{ 
-                    minHeight: '48px',
-                    maxHeight: '120px',
-                    overflowY: messageInput.split('\n').length > 3 ? 'auto' : 'hidden'
-                  }}
-                />
-                <Button
-                  onClick={sendMessage}
-                  disabled={!messageInput.trim() || sendingMessage}
-                  className="bg-[#BD8F29] hover:bg-[#BD8F29]/90 text-white px-6 py-3 h-12"
-                >
-                  {sendingMessage ? (
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : (
-                    <span className="font-semibold">Enviar</span>
-                  )}
-                </Button>
-              </div>
-              <p className="text-xs text-slate-500 mt-2">
-                💡 Dica: Pressione Enter para enviar ou Shift+Enter para quebrar linha
-              </p>
-            </div>
+            {/* Onde estava o footer com textarea, substitui por: */}
+            <MessageInput
+              onSend={async (msg) => {
+                const response = await fetch(
+                  `/api/conversas/${encodeURIComponent(selectedConversa.remoteJid)}/enviar`,
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: msg })
+                  }
+                )
+                if (!response.ok) throw new Error('Erro ao enviar')
+                await loadMessages(selectedConversa.remoteJid, true)
+              }}
+              disabled={false}
+            />
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center">
@@ -507,7 +633,7 @@ function formatRelativeTime(date: Date | string): string {
   if (diffMins < 60) return `${diffMins}min`
   if (diffHours < 24) return `${diffHours}h`
   if (diffDays < 7) return `${diffDays}d`
-  
+
   return then.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
 }
 

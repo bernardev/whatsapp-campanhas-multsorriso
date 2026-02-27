@@ -94,15 +94,11 @@ export default function DashboardClient({ user, stats, campanhas }: DashboardCli
   }
 
   // ✅ ADICIONADO: useEffect para carregar notificações
-  useEffect(() => {
-    loadNotificacoes()
-    
-    const interval = setInterval(() => {
-      loadNotificacoes()
-    }, 30000) // Atualiza a cada 30 segundos
-    
-    return () => clearInterval(interval)
-  }, [])
+useEffect(() => {
+  loadNotificacoes()
+  const interval = setInterval(loadNotificacoes, 2000)
+  return () => clearInterval(interval)
+}, [])
 
   async function handleLogout(): Promise<void> {
     await fetch('/api/auth/logout', { method: 'POST' })

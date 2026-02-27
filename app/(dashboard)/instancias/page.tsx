@@ -11,9 +11,10 @@ export default async function InstanciasPage() {
     redirect('/login')
   }
 
-  const instancias = await prisma.whatsAppInstance.findMany({
-    orderBy: { createdAt: 'desc' }
-  })
+const instancias = await prisma.whatsAppInstance.findMany({
+  where: { isActive: true },
+  orderBy: { createdAt: 'desc' }
+})
 
   return <InstanciasClient user={user} instancias={instancias} />
 }

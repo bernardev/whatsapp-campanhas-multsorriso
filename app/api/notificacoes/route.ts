@@ -35,8 +35,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         lastMessageAt: 'desc'
       }
     })
-    console.log(`[Notificacoes] Total de conversas encontradas: ${conversasResponse.length}`)
-    console.log(`[Notificacoes] RemoteJids:`, conversasResponse.map(c => c.remoteJid))
     for (const conv of conversasResponse) {
       // Busca última mensagem
       const lastMessage = await prisma.conversationMessage.findFirst({
