@@ -22,7 +22,8 @@ import {
   Trash2,
   Bell,
   Check,
-  Smartphone
+  Smartphone,
+  UserCog
 } from 'lucide-react'
 import { MessageStatus as PrismaMessageStatus, CampaignStatus } from '@prisma/client'
 
@@ -49,6 +50,7 @@ interface DashboardClientProps {
     id: string
     name: string
     email: string
+    role: 'ADMIN' | 'USER'
   }
   stats: {
     totalCampanhas: number
@@ -285,31 +287,65 @@ useEffect(() => {
                   Conversas
                 </Button>
 
-                <Button
-                  variant="ghost"
-                  onClick={() => router.push('/leads')}
-                  className={`flex items-center gap-2 ${
-                    isActive('/leads')
-                      ? 'bg-[#BD8F29]/10 text-[#BD8F29] font-semibold'
-                      : 'text-slate-600 hover:text-[#1D2748]'
-                  }`}
-                >
-                  <Users className="w-4 h-4" />
-                  Leads
-                </Button>
+                {user.role === 'ADMIN' && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => router.push('/leads')}
+                    className={`flex items-center gap-2 ${
+                      isActive('/leads')
+                        ? 'bg-[#BD8F29]/10 text-[#BD8F29] font-semibold'
+                        : 'text-slate-600 hover:text-[#1D2748]'
+                    }`}
+                  >
+                    <Users className="w-4 h-4" />
+                    Leads
+                  </Button>
+                )}
 
-                <Button
-                  variant="ghost"
-                  onClick={() => router.push('/instancias')}
-                  className={`flex items-center gap-2 ${
-                    isActive('/instancias')
-                      ? 'bg-[#BD8F29]/10 text-[#BD8F29] font-semibold'
-                      : 'text-slate-600 hover:text-[#1D2748]'
-                  }`}
-                >
-                  <Smartphone className="w-4 h-4" />
-                  Instâncias
-                </Button>
+                {user.role === 'ADMIN' && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => router.push('/instancias')}
+                    className={`flex items-center gap-2 ${
+                      isActive('/instancias')
+                        ? 'bg-[#BD8F29]/10 text-[#BD8F29] font-semibold'
+                        : 'text-slate-600 hover:text-[#1D2748]'
+                    }`}
+                  >
+                    <Smartphone className="w-4 h-4" />
+                    Instâncias
+                  </Button>
+                )}
+
+                {user.role === 'ADMIN' && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => router.push('/monitoramento')}
+                    className={`flex items-center gap-2 ${
+                      isActive('/monitoramento')
+                        ? 'bg-[#BD8F29]/10 text-[#BD8F29] font-semibold'
+                        : 'text-slate-600 hover:text-[#1D2748]'
+                    }`}
+                  >
+                    <BarChart3 className="w-4 h-4" />
+                    Monitoramento
+                  </Button>
+                )}
+
+                {user.role === 'ADMIN' && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => router.push('/usuarios')}
+                    className={`flex items-center gap-2 ${
+                      isActive('/usuarios')
+                        ? 'bg-[#BD8F29]/10 text-[#BD8F29] font-semibold'
+                        : 'text-slate-600 hover:text-[#1D2748]'
+                    }`}
+                  >
+                    <UserCog className="w-4 h-4" />
+                    Usuários
+                  </Button>
+                )}
               </nav>
             </div>
 

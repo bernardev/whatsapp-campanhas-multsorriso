@@ -27,6 +27,7 @@ export async function POST(
         needsResponse: false,
         notificationRead: true,
         respondedAt: new Date(),
+        respondedByUserId: user.id,
         updatedAt: new Date()
       },
       create: {
@@ -34,7 +35,8 @@ export async function POST(
         needsResponse: false,
         notificationRead: true,
         lastMessageAt: new Date(),
-        respondedAt: new Date()
+        respondedAt: new Date(),
+        respondedByUserId: user.id
       }
     })
 
@@ -69,6 +71,7 @@ export async function DELETE(
         needsResponse: true,
         notificationRead: false,
         respondedAt: null,
+        respondedByUserId: null,
         updatedAt: new Date()
       },
       create: {

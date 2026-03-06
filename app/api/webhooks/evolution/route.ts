@@ -37,6 +37,14 @@ interface MessageUpdateData {
   errorMsg?: string
 }
 
+// Resolve instanceKey (string do Evolution) → ID do banco (CUID)
+async function resolveInstance(instanceKey: string) {
+  return prisma.whatsAppInstance.findUnique({
+    where: { instanceKey },
+    select: { id: true, instanceKey: true }
+  })
+}
+
 async function createOrUpdateLead(remoteJid: string): Promise<void> {
   try {
     if (remoteJid.includes('status@broadcast')) return
@@ -91,16 +99,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const { event, instance, data } = body
 
+    // Resolve instanceKey → CUID do banco
+    const dbInstance = await resolveInstance(instance)
+    if (!dbInstance) {
+      console.log(`[Webhook] Instância desconhecida: ${instance}, ignorando`)
+      return NextResponse.json({ success: true })
+    }
+
+    const instanceId = dbInstance.id
+
     if (event === 'messages.upsert') {
-      await saveToConversationHistory(data, instance)
+      await saveToConversationHistory(data, instanceId)
     }
 
     if (event === 'messages.update') {
-      await handleMessageStatusUpdate(data, instance)
+      await handleMessageStatusUpdate(data, instanceId)
     }
 
     if (event === 'messages.upsert' && data.key?.fromMe === true) {
-      await handleMessageSent(data, instance)
+      await handleMessageSent(data, instanceId)
     }
 
     if (event === 'messages.upsert' && data.key?.fromMe === false) {
@@ -120,7 +137,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 async function saveToConversationHistory(
   data: WebhookData,
-  instance: string
+  instanceId: string
 ): Promise<void> {
   try {
     const messageId = data.key?.id
@@ -153,7 +170,7 @@ async function saveToConversationHistory(
       const sentMessage = await prisma.message.findFirst({
         where: {
           contact: { phone },
-          instanceId: instance,
+          instanceId: instanceId,
           imageUrl: { not: null }
         },
         orderBy: { createdAt: 'desc' },
@@ -176,7 +193,7 @@ async function saveToConversationHistory(
 
     await prisma.conversationMessage.create({
       data: {
-        instanceId: instance,
+        instanceId: instanceId,
         messageId,
         remoteJid,
         fromMe,
@@ -233,7 +250,7 @@ async function saveToConversationHistory(
 
 async function handleMessageStatusUpdate(
   data: WebhookData,
-  instance: string
+  instanceId: string
 ): Promise<void> {
   try {
     const remoteJid = data.key?.remoteJid?.replace('@s.whatsapp.net', '')
@@ -249,7 +266,7 @@ async function handleMessageStatusUpdate(
     const message = await prisma.message.findFirst({
       where: {
         contact: { phone },
-        instanceId: instance,
+        instanceId: instanceId,
         status: { in: ['PENDING', 'SENDING', 'SENT', 'DELIVERED'] }
       },
       orderBy: { createdAt: 'desc' }
@@ -304,7 +321,7 @@ async function handleMessageStatusUpdate(
 
 async function handleMessageSent(
   data: WebhookData,
-  instance: string
+  instanceId: string
 ): Promise<void> {
   try {
     const messageKey = data.key?.id
@@ -317,7 +334,7 @@ async function handleMessageSent(
     const message = await prisma.message.findFirst({
       where: {
         contact: { phone },
-        instanceId: instance,
+        instanceId: instanceId,
         status: 'SENDING'
       },
       orderBy: { createdAt: 'desc' }

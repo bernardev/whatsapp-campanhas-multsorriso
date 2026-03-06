@@ -18,9 +18,13 @@ export async function POST(
 ): Promise<NextResponse> {
   try {
     const user = await getUser()
-    
+
     if (!user) {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    }
+
+    if (user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Acesso restrito a administradores' }, { status: 403 })
     }
 
     const { id } = await context.params

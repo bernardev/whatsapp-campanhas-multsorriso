@@ -30,15 +30,37 @@ export async function POST(
       return NextResponse.json({ error: 'Mensagem vazia' }, { status: 400 })
     }
 
-    // Envia pela Evolution API
+    // Descobre qual instância recebeu a última mensagem deste contato
     const evolutionUrl = process.env.EVOLUTION_API_URL || 'http://localhost:8080'
-    const instance = await prisma.whatsAppInstance.findFirst({
-      where: { 
-        status: 'connected',
-        isActive: true 
-      },
-      orderBy: { createdAt: 'desc' }
+
+    let instance = null
+
+    const lastMsg = await prisma.conversationMessage.findFirst({
+      where: { remoteJid },
+      orderBy: { timestamp: 'desc' },
+      select: { instanceId: true }
     })
+
+    if (lastMsg?.instanceId) {
+      instance = await prisma.whatsAppInstance.findFirst({
+        where: {
+          id: lastMsg.instanceId,
+          status: 'connected',
+          isActive: true
+        }
+      })
+    }
+
+    // Fallback: qualquer instância conectada
+    if (!instance) {
+      instance = await prisma.whatsAppInstance.findFirst({
+        where: {
+          status: 'connected',
+          isActive: true
+        },
+        orderBy: { createdAt: 'desc' }
+      })
+    }
 
     if (!instance) {
       return NextResponse.json(
@@ -75,7 +97,7 @@ export async function POST(
     
     console.log(`✅ [Send] Mensagem enviada com sucesso! ID: ${messageId}`)
 
-    // ✅ SALVA NO HISTÓRICO MANUALMENTE
+    // Salva no histórico
     try {
       await prisma.conversationMessage.create({
         data: {
@@ -91,9 +113,24 @@ export async function POST(
           source: 'web'
         }
       })
-      console.log(`💾 [Send] Mensagem salva no histórico`)
+      console.log(`[Send] Mensagem salva no histórico`)
     } catch (dbError) {
-      console.error('⚠️ [Send] Erro ao salvar no histórico (pode já existir):', dbError)
+      console.error('[Send] Erro ao salvar no histórico (pode já existir):', dbError)
+    }
+
+    // Marca conversa como respondida por este usuário
+    try {
+      await prisma.conversationResponse.updateMany({
+        where: { remoteJid, needsResponse: true },
+        data: {
+          needsResponse: false,
+          notificationRead: true,
+          respondedAt: new Date(),
+          respondedByUserId: user.id
+        }
+      })
+    } catch (e) {
+      console.error('[Send] Erro ao marcar respondido:', e)
     }
 
     return NextResponse.json({ 

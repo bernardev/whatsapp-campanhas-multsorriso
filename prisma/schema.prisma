@@ -11,15 +11,23 @@ datasource db {
 
 // ========== USUÁRIOS ==========
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  password  String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
+  id          String    @id @default(cuid())
+  email       String    @unique
+  name        String
+  password    String
+  role        UserRole  @default(USER)
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
   campaigns Campaign[]
   leads     Lead[]
+  conversationResponses ConversationResponse[]
+}
+
+enum UserRole {
+  ADMIN
+  USER
 }
 
 // ========== CAMPANHAS ==========
@@ -171,7 +179,10 @@ model ConversationResponse {
   notificationRead  Boolean  @default(false)
   lastMessageAt     DateTime
   respondedAt       DateTime?
-  
+
+  respondedByUserId String?
+  respondedBy       User?    @relation(fields: [respondedByUserId], references: [id], onDelete: SetNull)
+
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -179,6 +190,7 @@ model ConversationResponse {
   @@index([needsResponse])
   @@index([notificationRead])
   @@index([lastMessageAt])
+  @@index([respondedByUserId])
   @@map("conversation_responses")
 }
 

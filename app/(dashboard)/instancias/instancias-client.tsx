@@ -33,6 +33,7 @@ interface InstanciasClientProps {
     id: string
     name: string
     email: string
+    role: 'ADMIN' | 'USER'
   }
   instancias: WhatsAppInstance[]
 }

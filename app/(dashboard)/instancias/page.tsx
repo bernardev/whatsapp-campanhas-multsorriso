@@ -6,9 +6,13 @@ import InstanciasClient from './instancias-client'
 
 export default async function InstanciasPage() {
   const user = await getUser()
-  
+
   if (!user) {
     redirect('/login')
+  }
+
+  if (user.role !== 'ADMIN') {
+    redirect('/campanhas')
   }
 
 const instancias = await prisma.whatsAppInstance.findMany({

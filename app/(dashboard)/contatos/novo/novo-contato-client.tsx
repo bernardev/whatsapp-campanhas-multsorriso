@@ -24,6 +24,7 @@ interface NovoContatoClientProps {
     id: string
     name: string
     email: string
+    role: 'ADMIN' | 'USER'
   }
 }
 

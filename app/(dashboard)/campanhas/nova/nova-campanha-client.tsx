@@ -49,6 +49,7 @@ interface NovaCampanhaClientProps {
     id: string
     name: string
     email: string
+    role: 'ADMIN' | 'USER'
   }
   contatos: Contact[]
 }

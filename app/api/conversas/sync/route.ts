@@ -67,113 +67,119 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
     }
 
-    const instance = await prisma.whatsAppInstance.findFirst({
+    const instances = await prisma.whatsAppInstance.findMany({
       where: { isActive: true, status: { not: 'deleted' } }
     })
 
-    if (!instance) {
+    if (instances.length === 0) {
       return NextResponse.json({ error: 'Nenhuma instância conectada' }, { status: 400 })
     }
 
-    const instanceKey = instance.instanceKey
     const headers: HeadersInit = {
       'apikey': EVOLUTION_KEY!,
       'Content-Type': 'application/json'
     }
 
-    // Busca todos os chats — lastMessage já vem embutido
-    const chatsRes = await fetch(
-      `${EVOLUTION_URL}/chat/findChats/${instanceKey}`,
-      { method: 'POST', headers, body: JSON.stringify({}) }
-    )
-
-    if (!chatsRes.ok) {
-      const err = await chatsRes.text()
-      console.error('[Sync] Erro ao buscar chats:', err)
-      return NextResponse.json({ error: 'Erro ao buscar chats' }, { status: 500 })
-    }
-
-    const chats: EvolutionChat[] = await chatsRes.json()
-
     let totalChats = 0
     let totalSynced = 0
     let totalSkipped = 0
 
-    for (const chat of chats) {
-      const remoteJid = chat.remoteJid
-
-      // Ignora broadcasts e status
-      if (!remoteJid || remoteJid === 'status@broadcast') continue
-
-      const lastMsg = chat.lastMessage
-      if (!lastMsg) {
-        totalSkipped++
-        continue
-      }
-
-      totalChats++
-
-      const messageId = lastMsg.key?.id
-      if (!messageId) continue
-
-      const text = extractText(lastMsg.message, lastMsg.messageType)
-      const fromMe = lastMsg.key?.fromMe ?? false
-      const timestamp = lastMsg.messageTimestamp
-        ? new Date(Number(lastMsg.messageTimestamp) * 1000)
-        : new Date()
-
-      const pushName = lastMsg.pushName || chat.pushName || null
-
+    for (const instance of instances) {
       try {
-        // Upsert da última mensagem
-        await prisma.conversationMessage.upsert({
-          where: { messageId },
-          create: {
-            messageId,
-            instanceId: instance.id,
-            remoteJid,
-            fromMe,
-            participant: lastMsg.key?.participant ?? null,
-            pushName,
-            messageText: text,
-            messageType: lastMsg.messageType ?? 'conversation',
-            imageUrl: null,
-            timestamp,
-          },
-          update: {
-            messageText: text,
-            pushName,
-          }
-        })
+        console.log(`[Sync] Sincronizando instância: ${instance.name} (${instance.instanceKey})`)
 
-        // Upsert do status de resposta — não sobrescreve needsResponse se já existe
-        await prisma.conversationResponse.upsert({
-          where: { remoteJid },
-          create: {
-            remoteJid,
-            needsResponse: !fromMe,
-            lastMessageAt: timestamp,
-          },
-          update: {
-            lastMessageAt: timestamp,
-            // Não altera needsResponse — respeita o que o usuário definiu manualmente
-          }
-        })
+        const chatsRes = await fetch(
+          `${EVOLUTION_URL}/chat/findChats/${instance.instanceKey}`,
+          { method: 'POST', headers, body: JSON.stringify({}) }
+        )
 
-        totalSynced++
+        if (!chatsRes.ok) {
+          const err = await chatsRes.text()
+          console.error(`[Sync] Erro ao buscar chats da instância ${instance.name}:`, err)
+          continue // Pula para a próxima instância
+        }
+
+        const chats: EvolutionChat[] = await chatsRes.json()
+
+        for (const chat of chats) {
+          const remoteJid = chat.remoteJid
+
+          if (!remoteJid || remoteJid === 'status@broadcast') continue
+
+          const lastMsg = chat.lastMessage
+          if (!lastMsg) {
+            totalSkipped++
+            continue
+          }
+
+          totalChats++
+
+          const messageId = lastMsg.key?.id
+          if (!messageId) continue
+
+          const text = extractText(lastMsg.message, lastMsg.messageType)
+          const fromMe = lastMsg.key?.fromMe ?? false
+          const timestamp = lastMsg.messageTimestamp
+            ? new Date(Number(lastMsg.messageTimestamp) * 1000)
+            : new Date()
+
+          const pushName = lastMsg.pushName || chat.pushName || null
+
+          try {
+            await prisma.conversationMessage.upsert({
+              where: { messageId },
+              create: {
+                messageId,
+                instanceId: instance.id,
+                remoteJid,
+                fromMe,
+                participant: lastMsg.key?.participant ?? null,
+                pushName,
+                messageText: text,
+                messageType: lastMsg.messageType ?? 'conversation',
+                imageUrl: null,
+                timestamp,
+              },
+              update: {
+                messageText: text,
+                pushName,
+              }
+            })
+
+            await prisma.conversationResponse.upsert({
+              where: { remoteJid },
+              create: {
+                remoteJid,
+                needsResponse: !fromMe,
+                lastMessageAt: timestamp,
+              },
+              update: {
+                lastMessageAt: timestamp,
+              }
+            })
+
+            totalSynced++
+          } catch (err) {
+            console.error(`[Sync] Erro no chat ${remoteJid}:`, err)
+          }
+        }
+
+        console.log(`[Sync] Instância ${instance.name} sincronizada`)
       } catch (err) {
-        console.error(`[Sync] Erro no chat ${remoteJid}:`, err)
+        console.error(`[Sync] Erro na instância ${instance.name}:`, err)
+        continue
       }
     }
 
-    console.log(`[Sync] Concluído: ${totalChats} chats, ${totalSynced} sincronizados, ${totalSkipped} sem lastMessage`)
+    console.log(`[Sync] Concluído: ${instances.length} instância(s), ${totalChats} chats, ${totalSynced} sincronizados, ${totalSkipped} sem lastMessage`)
 
     return NextResponse.json({
       success: true,
+      totalInstances: instances.length,
       totalChats,
       totalSynced,
       totalSkipped,
-      message: `${totalSynced} conversas sincronizadas com sucesso`
+      message: `${totalSynced} conversas sincronizadas de ${instances.length} instância(s)`
     })
 
   } catch (error) {

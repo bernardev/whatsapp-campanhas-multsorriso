@@ -61,15 +61,15 @@ export async function POST(
       return NextResponse.json({ error: 'Campanha já está em execução' }, { status: 400 })
     }
 
-    const instance = await prisma.whatsAppInstance.findFirst({
-      where: { 
+    const instances = await prisma.whatsAppInstance.findMany({
+      where: {
         status: 'connected',
-        isActive: true 
+        isActive: true
       },
       orderBy: { createdAt: 'desc' }
     })
 
-    if (!instance) {
+    if (instances.length === 0) {
       return NextResponse.json(
         { error: 'Nenhuma instância conectada. Conecte uma instância em /instancias' },
         { status: 400 }
@@ -82,12 +82,15 @@ export async function POST(
     })
 
     console.log(`[Campaign] Iniciando envio: ${campaign.name}${campaign.imageUrl ? ' (com imagem)' : ''}`)
-    console.log(`[Campaign] Usando instância: ${instance.name} (${instance.instanceKey})`)
+    console.log(`[Campaign] Usando ${instances.length} instância(s): ${instances.map(i => `${i.name} (${i.instanceKey})`).join(', ')}`)
 
     let messagesCreated = 0
 
     for (const campaignContact of campaign.contacts) {
       const contact = campaignContact.contact
+
+      // Round-robin: distribui mensagens entre instâncias conectadas
+      const instance = instances[messagesCreated % instances.length]
 
       let personalizedMessage = campaign.message
       personalizedMessage = personalizedMessage.replace(/{nome}/gi, contact.name || 'Cliente')
@@ -97,7 +100,7 @@ export async function POST(
         data: {
           campaignId: campaign.id,
           contactId: contact.id,
-          instanceId: instance.id,  // ✅ USA O ID DA INSTÂNCIA
+          instanceId: instance.id,
           text: personalizedMessage,
           imageUrl: campaign.imageUrl || null,
           status: 'PENDING',
@@ -110,7 +113,7 @@ export async function POST(
           messageId: message.id,
           campaignId: campaign.id,
           contactId: contact.id,
-          instanceKey: instance.instanceKey,  // ✅ PASSA O KEY PARA O WORKER
+          instanceKey: instance.instanceKey,
           phone: contact.phone,
           message: personalizedMessage,
         },

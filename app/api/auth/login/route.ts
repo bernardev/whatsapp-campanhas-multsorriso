@@ -40,11 +40,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Atualiza último login
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() }
+    })
+
     // Cria JWT token
-    const token = await new SignJWT({ 
+    const token = await new SignJWT({
       userId: user.id,
       email: user.email,
-      name: user.name
+      name: user.name,
+      role: user.role
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setExpirationTime('7d')
@@ -55,7 +62,8 @@ export async function POST(request: NextRequest) {
       user: {
         id: user.id,
         email: user.email,
-        name: user.name
+        name: user.name,
+        role: user.role
       }
     })
 
