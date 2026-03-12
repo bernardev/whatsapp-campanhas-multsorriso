@@ -4,8 +4,8 @@
 import { useEffect, useState, useRef, memo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
-import { 
-  MessageSquare, 
+import {
+  MessageSquare,
   Search,
   ArrowLeft,
   Users,
@@ -14,6 +14,9 @@ import {
   Clock,
   AlertCircle,
   X,
+  Plus,
+  Loader2,
+  Building2,
 } from 'lucide-react'
 
 interface Message {
@@ -36,7 +39,30 @@ interface Conversa {
   messages: Message[]
 }
 
+interface ContactResult {
+  id: string
+  name: string | null
+  phone: string
+  company: string | null
+}
+
 type FilterType = 'all' | 'pending' | 'responded'
+
+function phoneToRemoteJid(phone: string): string {
+  const digits = phone.replace(/\D/g, '')
+  return `${digits}@s.whatsapp.net`
+}
+
+function formatPhoneDisplay(phone: string): string {
+  const digits = phone.replace(/\D/g, '')
+  if (digits.length === 13) {
+    return `+${digits.slice(0, 2)} (${digits.slice(2, 4)}) ${digits.slice(4, 9)}-${digits.slice(9)}`
+  }
+  if (digits.length === 12) {
+    return `+${digits.slice(0, 2)} (${digits.slice(2, 4)}) ${digits.slice(4, 8)}-${digits.slice(8)}`
+  }
+  return phone
+}
 
 const MessageInput = memo(({ 
   onSend, 
@@ -114,6 +140,10 @@ export default function ConversasPage() {
   const [syncResult, setSyncResult] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const [showNovaConversa, setShowNovaConversa] = useState(false)
+  const [contactSearch, setContactSearch] = useState('')
+  const [contactResults, setContactResults] = useState<ContactResult[]>([])
+  const [searchingContacts, setSearchingContacts] = useState(false)
 
   const selectedConversaRef = useRef<Conversa | null>(null)
   const messagesRef = useRef<Message[]>([])
@@ -136,6 +166,63 @@ export default function ConversasPage() {
     } finally {
       setSyncing(false)
     }
+  }
+
+  // Busca de contatos com debounce
+  useEffect(() => {
+    if (contactSearch.trim().length < 2) {
+      setContactResults([])
+      return
+    }
+
+    const timeout = setTimeout(async () => {
+      setSearchingContacts(true)
+      try {
+        const res = await fetch(`/api/contatos/buscar?q=${encodeURIComponent(contactSearch)}`)
+        const data = await res.json()
+        setContactResults(data.contatos || [])
+      } catch {
+        setContactResults([])
+      } finally {
+        setSearchingContacts(false)
+      }
+    }, 300)
+
+    return () => clearTimeout(timeout)
+  }, [contactSearch])
+
+  function handleSelectContact(contact: ContactResult) {
+    const remoteJid = phoneToRemoteJid(contact.phone)
+
+    // Verifica se já existe conversa na lista
+    const existing = conversas.find(c => c.remoteJid === remoteJid)
+
+    if (existing) {
+      setSelectedConversa(existing)
+      selectedConversaRef.current = existing
+      loadMessages(existing.remoteJid)
+    } else {
+      // Cria conversa sintética — será persistida ao enviar a primeira mensagem
+      const newConversa: Conversa = {
+        remoteJid,
+        displayName: contact.name || contact.phone,
+        displayPhone: contact.phone.replace(/\D/g, ''),
+        isGroup: false,
+        lastMessage: '',
+        lastMessageAt: new Date(),
+        lastMessageFromMe: false,
+        needsResponse: false,
+        messages: [],
+      }
+      setSelectedConversa(newConversa)
+      selectedConversaRef.current = newConversa
+      setMessages([])
+    }
+
+    // Fecha modal e limpa busca
+    setShowNovaConversa(false)
+    setContactSearch('')
+    setContactResults([])
   }
 
   useEffect(() => {
@@ -326,28 +413,37 @@ export default function ConversasPage() {
               )}
             </div>
 
-            {/* Botão Sincronizar */}
-            <div className="mb-4">
-              <Button
-                onClick={syncConversas}
-                disabled={syncing}
-                variant="outline"
-                size="sm"
-                className="w-full border-[#BD8F29] text-[#BD8F29] hover:bg-[#BD8F29]/10"
-              >
-                {syncing ? (
-                  <>
-                    <div className="w-3.5 h-3.5 border-2 border-[#BD8F29] border-t-transparent rounded-full animate-spin mr-2" />
-                    Sincronizando...
-                  </>
-                ) : (
-                  'Sincronizar conversas do WhatsApp'
-                )}
-              </Button>
-              {syncResult && (
-                <p className="text-xs text-center mt-1.5 text-slate-500">{syncResult}</p>
+            {/* Botão Nova Conversa */}
+            <Button
+              onClick={() => setShowNovaConversa(true)}
+              size="sm"
+              className="bg-[#BD8F29] hover:bg-[#BD8F29]/90 text-white"
+            >
+              <Plus className="w-4 h-4" />
+            </Button>
+          </div>
+
+          {/* Botão Sincronizar */}
+          <div className="mb-4">
+            <Button
+              onClick={syncConversas}
+              disabled={syncing}
+              variant="outline"
+              size="sm"
+              className="w-full border-[#BD8F29] text-[#BD8F29] hover:bg-[#BD8F29]/10"
+            >
+              {syncing ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-[#BD8F29] border-t-transparent rounded-full animate-spin mr-2" />
+                  Sincronizando...
+                </>
+              ) : (
+                'Sincronizar conversas do WhatsApp'
               )}
-            </div>
+            </Button>
+            {syncResult && (
+              <p className="text-xs text-center mt-1.5 text-slate-500">{syncResult}</p>
+            )}
           </div>
 
           {/* Busca */}
@@ -552,7 +648,11 @@ export default function ConversasPage() {
                 </div>
               ) : messages.length === 0 ? (
                 <div className="flex items-center justify-center h-full">
-                  <p className="text-sm text-slate-400">Nenhuma mensagem encontrada</p>
+                  <div className="text-center">
+                    <MessageSquare className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                    <p className="text-sm text-slate-500 font-medium">Nenhuma mensagem ainda</p>
+                    <p className="text-xs text-slate-400 mt-1">Envie a primeira mensagem para iniciar a conversa</p>
+                  </div>
                 </div>
               ) : (
                 messages.slice().reverse().map((msg) => (
@@ -617,6 +717,102 @@ export default function ConversasPage() {
           </div>
         )}
       </div>
+
+      {/* Modal Nova Conversa */}
+      {showNovaConversa && (
+        <>
+          <div className="fixed inset-0 bg-black/50 z-50" onClick={() => {
+            setShowNovaConversa(false)
+            setContactSearch('')
+            setContactResults([])
+          }} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+              <div className="p-6 border-b border-slate-200">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-[#1D2748] flex items-center gap-2">
+                    <Plus className="w-5 h-5 text-[#BD8F29]" />
+                    Nova Conversa
+                  </h2>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowNovaConversa(false)
+                      setContactSearch('')
+                      setContactResults([])
+                    }}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+                <p className="text-sm text-slate-500 mt-1">Busque um contato para iniciar a conversa</p>
+              </div>
+
+              <div className="p-4">
+                {/* Campo de busca */}
+                <div className="relative mb-4">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por nome ou telefone..."
+                    value={contactSearch}
+                    onChange={(e) => setContactSearch(e.target.value)}
+                    autoFocus
+                    className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-[#BD8F29] focus:border-transparent text-sm transition-all"
+                  />
+                </div>
+
+                {/* Resultados */}
+                <div className="max-h-72 overflow-y-auto space-y-1">
+                  {searchingContacts ? (
+                    <div className="text-center py-8">
+                      <Loader2 className="w-6 h-6 animate-spin text-[#BD8F29] mx-auto" />
+                    </div>
+                  ) : contactResults.length > 0 ? (
+                    contactResults.map((contact) => (
+                      <button
+                        key={contact.id}
+                        onClick={() => handleSelectContact(contact)}
+                        className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-slate-50 cursor-pointer transition-all border border-transparent hover:border-slate-200 text-left"
+                      >
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#BD8F29] to-[#BD8F29]/80 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                          {(contact.name || '?')[0].toUpperCase()}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-slate-900 text-sm truncate">
+                            {contact.name || 'Sem nome'}
+                          </p>
+                          <p className="text-xs text-slate-500 flex items-center gap-1">
+                            <Phone className="w-3 h-3" />
+                            {formatPhoneDisplay(contact.phone)}
+                          </p>
+                          {contact.company && (
+                            <p className="text-xs text-slate-400 truncate flex items-center gap-1">
+                              <Building2 className="w-3 h-3" />
+                              {contact.company}
+                            </p>
+                          )}
+                        </div>
+                      </button>
+                    ))
+                  ) : contactSearch.length >= 2 ? (
+                    <div className="text-center py-8">
+                      <Search className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="text-sm text-slate-500">Nenhum contato encontrado</p>
+                    </div>
+                  ) : (
+                    <div className="text-center py-8">
+                      <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                      <p className="text-sm text-slate-400">Digite pelo menos 2 caracteres para buscar</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

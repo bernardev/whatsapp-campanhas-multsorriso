@@ -59,20 +59,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 for (const contatoCSV of contacts) {
   try {
-    // Valida se tem name e phone
-    if (!contatoCSV.name || !contatoCSV.phone) {
+    // Valida se tem phone (name é opcional)
+    if (!contatoCSV.phone) {
       resultados.skipped++
       resultados.errors.push(
-        `Linha ignorada: faltam dados obrigatórios (name: ${contatoCSV.name || 'vazio'}, phone: ${contatoCSV.phone || 'vazio'})`
+        `Linha ignorada: telefone vazio (name: ${contatoCSV.name || 'vazio'})`
       )
       continue
     }
 
     const phoneFormatado = validarTelefone(contatoCSV.phone)
-    
+
     if (!phoneFormatado) {
       resultados.skipped++
-      resultados.errors.push(`${contatoCSV.name}: telefone inválido (${contatoCSV.phone})`)
+      resultados.errors.push(`${contatoCSV.name || 'sem nome'}: telefone inválido (${contatoCSV.phone})`)
       continue
     }
 
@@ -87,7 +87,7 @@ for (const contatoCSV of contacts) {
 
     await prisma.contact.create({
       data: {
-        name: contatoCSV.name,
+        name: contatoCSV.name || 'Contato',
         phone: phoneFormatado,
         company: contatoCSV.company || null,
       }
