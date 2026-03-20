@@ -5,9 +5,6 @@ import 'dotenv/config'
 console.log('[Redis] Connecting to:', process.env.REDIS_URL)
 const redis = new Redis(process.env.REDIS_URL!, {
   maxRetriesPerRequest: null,
-  tls: {
-    rejectUnauthorized: false
-  }
 })
 
 redis.on('error', (err) => {
