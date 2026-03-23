@@ -70,6 +70,8 @@ export const messageWorker = new Worker<SendMessageJob>(
   {
     connection: redis,
     concurrency: 1,
+    drainDelay: 30,
+    stalledInterval: 120000,
     limiter: {
       max: parseInt(process.env.MESSAGES_PER_MINUTE || '20'),
       duration: 60000,
