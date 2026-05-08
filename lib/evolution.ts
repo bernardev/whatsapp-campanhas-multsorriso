@@ -77,9 +77,53 @@ export async function checkInstanceStatus(instanceKey: string): Promise<Evolutio
     return { success: true, data: response.data }
   } catch (error) {
     const axiosError = error as AxiosError
-    return { 
-      success: false, 
-      error: JSON.stringify(axiosError.response?.data) || axiosError.message 
+    return {
+      success: false,
+      error: JSON.stringify(axiosError.response?.data) || axiosError.message
+    }
+  }
+}
+
+// Para instâncias com integration=WHATSAPP-BUSINESS (Cloud API).
+// Em instâncias Baileys (QR Code) use sendTextMessage.
+export async function sendTemplateMessage(
+  instanceKey: string,
+  phone: string,
+  templateName: string,
+  language: string,
+  bodyParams: string[] = []
+): Promise<EvolutionResponse> {
+  console.log(`[Evolution] Template ${templateName} via ${instanceKey} → ${phone}`)
+
+  try {
+    const components = bodyParams.length > 0
+      ? [{
+          type: 'body',
+          parameters: bodyParams.map(text => ({ type: 'text', text })),
+        }]
+      : []
+
+    const response = await evolutionAPI.post(
+      `/message/sendTemplate/${instanceKey}`,
+      {
+        number: phone,
+        template: {
+          name: templateName,
+          language,
+          components,
+        },
+      }
+    )
+    return { success: true, data: response.data }
+  } catch (error) {
+    const axiosError = error as AxiosError
+    console.error(
+      'Evolution API Error (Template):',
+      axiosError.response?.data || axiosError.message
+    )
+    return {
+      success: false,
+      error: JSON.stringify(axiosError.response?.data) || axiosError.message,
     }
   }
 }
