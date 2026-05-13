@@ -107,11 +107,9 @@ export async function sendTemplateMessage(
       `/message/sendTemplate/${instanceKey}`,
       {
         number: phone,
-        template: {
-          name: templateName,
-          language,
-          components,
-        },
+        name: templateName,
+        language,
+        components,
       }
     )
     return { success: true, data: response.data }

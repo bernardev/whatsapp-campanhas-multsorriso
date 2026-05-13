@@ -76,33 +76,66 @@ export async function POST(
       )
     }
 
+    const isCloud = !!campaign.templateName
+    const cloudInstance = isCloud
+      ? instances.find(i => i.provider === 'CLOUD_API')
+      : null
+    const baileysInstances = isCloud
+      ? []
+      : instances.filter(i => i.provider !== 'CLOUD_API')
+
+    if (isCloud && !cloudInstance) {
+      return NextResponse.json(
+        { error: 'Campanha Cloud API requer uma instância CLOUD_API conectada' },
+        { status: 400 }
+      )
+    }
+    if (!isCloud && baileysInstances.length === 0) {
+      return NextResponse.json(
+        { error: 'Nenhuma instância Baileys conectada' },
+        { status: 400 }
+      )
+    }
+
     await prisma.campaign.update({
       where: { id: campaignId },
       data: { status: 'RUNNING' },
     })
 
-    console.log(`[Campaign] Iniciando envio: ${campaign.name}${campaign.imageUrl ? ' (com imagem)' : ''}`)
-    console.log(`[Campaign] Usando ${instances.length} instância(s): ${instances.map(i => `${i.name} (${i.instanceKey})`).join(', ')}`)
+    const usedInstances = isCloud ? [cloudInstance!] : baileysInstances
+    console.log(`[Campaign] Iniciando envio: ${campaign.name}${campaign.imageUrl ? ' (com imagem)' : ''}${isCloud ? ` (Cloud API template: ${campaign.templateName})` : ''}`)
+    console.log(`[Campaign] Usando ${usedInstances.length} instância(s): ${usedInstances.map(i => `${i.name} (${i.instanceKey})`).join(', ')}`)
+
+    const baseTemplateParams: string[] = Array.isArray(campaign.templateParams)
+      ? (campaign.templateParams as string[])
+      : []
 
     let messagesCreated = 0
 
     for (const campaignContact of campaign.contacts) {
       const contact = campaignContact.contact
 
-      // Round-robin: distribui mensagens entre instâncias conectadas
-      const instance = instances[messagesCreated % instances.length]
+      if (contact.blacklisted) continue
 
-      let personalizedMessage = campaign.message
-      personalizedMessage = personalizedMessage.replace(/{nome}/gi, contact.name || 'Cliente')
-      personalizedMessage = personalizedMessage.replace(/{empresa}/gi, contact.company || '')
+      const instance = isCloud
+        ? cloudInstance!
+        : baileysInstances[messagesCreated % baileysInstances.length]
+
+      const personalize = (s: string): string =>
+        s.replace(/\{nome\}/gi, contact.name || 'Cliente').replace(/\{empresa\}/gi, contact.company || '')
+
+      const personalizedMessage = personalize(campaign.message || '')
+      const personalizedParams = baseTemplateParams.map(personalize)
 
       const message = await prisma.message.create({
         data: {
           campaignId: campaign.id,
           contactId: contact.id,
           instanceId: instance.id,
-          text: personalizedMessage,
-          imageUrl: campaign.imageUrl || null,
+          text: isCloud
+            ? `[template:${campaign.templateName}] ${personalizedParams.join(' | ')}`.trim()
+            : personalizedMessage,
+          imageUrl: !isCloud ? (campaign.imageUrl || null) : null,
           status: 'PENDING',
         },
       })
@@ -116,6 +149,10 @@ export async function POST(
           instanceKey: instance.instanceKey,
           phone: contact.phone,
           message: personalizedMessage,
+          provider: instance.provider,
+          templateName: campaign.templateName || undefined,
+          templateLanguage: campaign.templateLanguage || undefined,
+          templateParams: isCloud ? personalizedParams : undefined,
         },
         {
           delay: messagesCreated * parseInt(process.env.DELAY_BETWEEN_MESSAGES || '3000'),

@@ -2,16 +2,25 @@
 import { Worker, Job } from 'bullmq'
 import { redis } from '@/lib/redis'
 import { prisma } from '@/lib/prisma'
-import { sendTextMessage } from '@/lib/evolution'
+import { sendTextMessage, sendTemplateMessage } from '@/lib/evolution'
 import { SendMessageJob } from '@/lib/queue'
 
 // Worker que processa as mensagens
 export const messageWorker = new Worker<SendMessageJob>(
   'messages',
   async (job: Job<SendMessageJob>) => {
-    const { messageId, phone, message, instanceKey } = job.data
+    const {
+      messageId,
+      phone,
+      message,
+      instanceKey,
+      provider,
+      templateName,
+      templateLanguage,
+      templateParams,
+    } = job.data
 
-    console.log(`[Worker] Processando mensagem ${messageId} para ${phone}`)
+    console.log(`[Worker] Processando mensagem ${messageId} para ${phone} (${provider || 'BAILEYS'})`)
 
     try {
       // Atualiza status para SENDING
@@ -20,8 +29,18 @@ export const messageWorker = new Worker<SendMessageJob>(
         data: { status: 'SENDING' }
       })
 
-      // Envia via Evolution API
-      const result = await sendTextMessage(instanceKey, phone, message)
+      // Roteamento: Cloud API exige template aprovado (Meta business-initiated).
+      // Baileys aceita texto livre.
+      const result =
+        provider === 'CLOUD_API' && templateName && templateLanguage
+          ? await sendTemplateMessage(
+              instanceKey,
+              phone,
+              templateName,
+              templateLanguage,
+              templateParams || []
+            )
+          : await sendTextMessage(instanceKey, phone, message)
 
       if (result.success) {
         // Sucesso - atualiza para SENT

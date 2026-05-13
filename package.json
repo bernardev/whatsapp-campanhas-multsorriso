@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "postinstall": "prisma generate",
     "start": "next start",
-    "worker": "tsx watch lib/worker.ts",
+    "worker": "tsx watch workers/message-worker.ts",
     "lint": "eslint"
   },
   "dependencies": {

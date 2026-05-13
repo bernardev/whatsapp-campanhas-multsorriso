@@ -38,17 +38,23 @@ model Campaign {
   imageUrl    String?                      //URL da imagem
   scheduledAt DateTime?
   status      CampaignStatus @default(DRAFT)
-  
+
+  // Cloud API (WHATSAPP-BUSINESS): envio via template aprovado pela Meta.
+  // Quando preenchidos, o worker dispara sendTemplate em vez de sendText.
+  templateName     String?
+  templateLanguage String?
+  templateParams   Json?   // ex: ["Maria", "12/05/2026", "14:00", "Dra. Ana"]
+
   userId      String
   user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   contacts    CampaignContact[]
   messages    Message[]
   leads       Lead[]
-  
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
+
   @@index([userId])
   @@index([status])
 }
@@ -131,15 +137,24 @@ model WhatsAppInstance {
   qrCode        String?  @db.Text
   isActive      Boolean  @default(true)
   userId        String?
-  
+
+  // BAILEYS = QR code (WhatsApp pessoal). CLOUD_API = Meta WhatsApp Business
+  // (sem QR, envio business-initiated só com template aprovado).
+  provider      InstanceProvider @default(BAILEYS)
+
   messages      Message[]
-  
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  
+
   @@index([isActive])
   @@index([userId])
   @@index([status])
+}
+
+enum InstanceProvider {
+  BAILEYS
+  CLOUD_API
 }
 
 // ========== HISTÓRICO DE CONVERSAS ==========

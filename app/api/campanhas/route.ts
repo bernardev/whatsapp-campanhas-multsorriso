@@ -65,12 +65,30 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json()
-    const { name, message, scheduledAt, contactIds, imageUrl } = body  // ✅ NOVO: imageUrl
+    const {
+      name,
+      message,
+      scheduledAt,
+      contactIds,
+      imageUrl,
+      templateName,
+      templateLanguage,
+      templateParams,
+    } = body
 
     // Validações
-    if (!name || !message) {
+    if (!name) {
       return NextResponse.json(
-        { error: 'Nome e mensagem são obrigatórios' },
+        { error: 'Nome é obrigatório' },
+        { status: 400 }
+      )
+    }
+
+    // Cloud API exige template; Baileys exige mensagem livre. Aceitamos os dois.
+    const isTemplate = Boolean(templateName && templateLanguage)
+    if (!isTemplate && (!message || message.trim().length < 1)) {
+      return NextResponse.json(
+        { error: 'Informe a mensagem (Baileys) ou template (Cloud API)' },
         { status: 400 }
       )
     }
@@ -86,11 +104,14 @@ export async function POST(request: NextRequest) {
     const campaign = await prisma.campaign.create({
       data: {
         name,
-        message,
-        imageUrl: imageUrl || null,  // ✅ NOVO: Salva imageUrl
+        message: message || '',
+        imageUrl: imageUrl || null,
         scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
         userId,
         status: scheduledAt ? 'SCHEDULED' : 'DRAFT',
+        templateName: templateName || null,
+        templateLanguage: templateLanguage || null,
+        templateParams: templateParams || undefined,
         contacts: {
           create: contactIds.map((contactId: string) => ({
             contactId
@@ -106,7 +127,7 @@ export async function POST(request: NextRequest) {
       }
     })
 
-    console.log(`✅ [Campaign] Criada: ${campaign.name}${imageUrl ? ' (com imagem)' : ''}`)
+    console.log(`✅ [Campaign] Criada: ${campaign.name}${isTemplate ? ` (template: ${templateName})` : imageUrl ? ' (com imagem)' : ''}`)
 
     return NextResponse.json({ campaign }, { status: 201 })
   } catch (error) {

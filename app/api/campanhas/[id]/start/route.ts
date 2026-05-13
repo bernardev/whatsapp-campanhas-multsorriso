@@ -81,16 +81,23 @@ export async function POST(
     // Cria mensagens e adiciona na fila
     let messagesCreated = 0
 
+    const isCloud = instance.provider === 'CLOUD_API'
+    const baseTemplateParams: string[] = Array.isArray(campaign.templateParams)
+      ? (campaign.templateParams as string[])
+      : []
+
     for (const campaignContact of campaign.contacts) {
       const contact = campaignContact.contact
 
       // Pula se estiver na blacklist
       if (contact.blacklisted) continue
 
-      // Personaliza mensagem com variáveis
-      let personalizedMessage = campaign.message
-      personalizedMessage = personalizedMessage.replace(/\{nome\}/gi, contact.name || '')
-      personalizedMessage = personalizedMessage.replace(/\{empresa\}/gi, contact.company || '')
+      // Personaliza variáveis nas mensagens (Baileys) e nos params de template (Cloud)
+      const personalize = (s: string): string =>
+        s.replace(/\{nome\}/gi, contact.name || '').replace(/\{empresa\}/gi, contact.company || '')
+
+      const personalizedMessage = personalize(campaign.message || '')
+      const personalizedParams = baseTemplateParams.map(personalize)
 
       // Cria registro de mensagem
       const message = await prisma.message.create({
@@ -98,7 +105,9 @@ export async function POST(
           campaignId: campaign.id,
           contactId: contact.id,
           instanceId: instance.id,
-          text: personalizedMessage,
+          text: isCloud
+            ? `[template:${campaign.templateName}] ${personalizedParams.join(' | ')}`
+            : personalizedMessage,
           status: 'QUEUED'
         }
       })
@@ -112,7 +121,11 @@ export async function POST(
           contactId: contact.id,
           instanceKey: instance.instanceKey,
           phone: contact.phone,
-          message: personalizedMessage
+          message: personalizedMessage,
+          provider: instance.provider,
+          templateName: campaign.templateName || undefined,
+          templateLanguage: campaign.templateLanguage || undefined,
+          templateParams: isCloud ? personalizedParams : undefined,
         },
         {
           delay: messagesCreated * parseInt(process.env.DELAY_BETWEEN_MESSAGES || '3000')

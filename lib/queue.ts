@@ -9,6 +9,12 @@ export interface SendMessageJob {
   instanceKey: string
   phone: string
   message: string
+  // Roteamento Cloud API (Meta WhatsApp Business). Quando provider=CLOUD_API
+  // o worker dispara sendTemplate em vez de sendText.
+  provider?: 'BAILEYS' | 'CLOUD_API'
+  templateName?: string
+  templateLanguage?: string
+  templateParams?: string[]
 }
 
 // Cria a fila de mensagens

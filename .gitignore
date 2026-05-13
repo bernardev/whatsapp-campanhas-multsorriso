@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# local maintenance scripts (ad-hoc tooling, not part of the app)
+/scripts/clean-queue.ts
+/scripts/delete-test-campaign.ts
+/scripts/inspect-campaign.ts
+/scripts/inspect-conversas.ts
+/scripts/inspect-queue.ts
+/scripts/reset-campaign.ts
+/scripts/wipe-conversas.ts

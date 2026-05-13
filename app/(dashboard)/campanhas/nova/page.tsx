@@ -17,5 +17,20 @@ export default async function NovaCampanhaPage() {
     orderBy: { name: 'asc' }
   })
 
-  return <NovaCampanhaClient user={user} contatos={contatos} />
+  // Busca instâncias ativas (Baileys conectadas + Cloud API). Necessário pra
+  // a UI decidir entre texto livre e template aprovado.
+  const instancias = await prisma.whatsAppInstance.findMany({
+    where: { isActive: true },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      name: true,
+      instanceKey: true,
+      provider: true,
+      status: true,
+      phone: true,
+    },
+  })
+
+  return <NovaCampanhaClient user={user} contatos={contatos} instancias={instancias} />
 }

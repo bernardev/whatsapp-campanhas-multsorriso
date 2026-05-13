@@ -1,7 +1,7 @@
 // app/(dashboard)/campanhas/nova/nova-campanha-client.tsx
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,32 +9,25 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import Image from 'next/image'
-import { 
-  ArrowLeft, 
-  Send, 
-  Save, 
-  Eye, 
+import {
+  ArrowLeft,
+  Send,
+  Save,
+  Eye,
   Calendar,
   AlertCircle,
   Sparkles,
   Users,
   CheckSquare,
   Square,
-  ImagePlus,  // ✅ NOVO
-  X,          // ✅ NOVO
-  Upload      // ✅ NOVO
+  ImagePlus,
+  X,
+  Upload,
+  Smartphone,
+  Cloud,
 } from 'lucide-react'
-import { z, ZodError } from 'zod'
+import { ZodError } from 'zod'
 
-const campanhaSchema = z.object({
-  name: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres'),
-  message: z.string().min(10, 'Mensagem deve ter pelo menos 10 caracteres'),
-  scheduledAt: z.string().optional(),
-  contactIds: z.array(z.string()).min(1, 'Selecione pelo menos um contato'),
-  imageUrl: z.string().optional(),  // ✅ NOVO
-})
-
-type CampanhaForm = z.infer<typeof campanhaSchema>
 type CampanhaStatus = 'DRAFT' | 'SCHEDULED'
 
 interface Contact {
@@ -42,6 +35,25 @@ interface Contact {
   name: string | null
   phone: string
   company: string | null
+}
+
+interface Instance {
+  id: string
+  name: string
+  instanceKey: string
+  provider: 'BAILEYS' | 'CLOUD_API'
+  status: string
+  phone: string | null
+}
+
+interface CloudTemplate {
+  id: string
+  name: string
+  language: string
+  category: string
+  bodyParamsCount: number
+  bodyText: string
+  headerText: string
 }
 
 interface NovaCampanhaClientProps {
@@ -52,6 +64,7 @@ interface NovaCampanhaClientProps {
     role: 'ADMIN' | 'USER'
   }
   contatos: Contact[]
+  instancias: Instance[]
 }
 
 interface FormErrors {
@@ -59,26 +72,77 @@ interface FormErrors {
   message?: string
   scheduledAt?: string
   contactIds?: string
-  imageUrl?: string  // ✅ NOVO
+  imageUrl?: string
+  instanceId?: string
+  templateName?: string
+  templateParams?: string
 }
 
-export default function NovaCampanhaClient({ user, contatos }: NovaCampanhaClientProps) {
+export default function NovaCampanhaClient({ user, contatos, instancias }: NovaCampanhaClientProps) {
   const router = useRouter()
   const [loading, setLoading] = useState<boolean>(false)
   const [errors, setErrors] = useState<FormErrors>({})
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [selectedContacts, setSelectedContacts] = useState<string[]>([])
-  
-  // ✅ NOVOS ESTADOS PARA IMAGEM
+
   const [imageUrl, setImageUrl] = useState<string>('')
   const [uploadingImage, setUploadingImage] = useState<boolean>(false)
   const [imagePreview, setImagePreview] = useState<string>('')
-  
+
   const [formData, setFormData] = useState({
     name: '',
     message: '',
     scheduledAt: '',
   })
+
+  // Instância e template (Cloud API)
+  const [instanceId, setInstanceId] = useState<string>(instancias[0]?.id || '')
+  const selectedInstance = instancias.find((i) => i.id === instanceId) || null
+  const isCloud = selectedInstance?.provider === 'CLOUD_API'
+
+  const [templates, setTemplates] = useState<CloudTemplate[]>([])
+  const [loadingTemplates, setLoadingTemplates] = useState<boolean>(false)
+  const [selectedTemplateName, setSelectedTemplateName] = useState<string>('')
+  const selectedTemplate = templates.find((t) => t.name === selectedTemplateName) || null
+  const [templateParams, setTemplateParams] = useState<string[]>([])
+
+  // Carrega templates da Meta quando a instância selecionada for Cloud API
+  useEffect(() => {
+    if (!isCloud || !instanceId) {
+      setTemplates([])
+      setSelectedTemplateName('')
+      setTemplateParams([])
+      return
+    }
+    let aborted = false
+    setLoadingTemplates(true)
+    fetch(`/api/whatsapp/templates?instanceId=${encodeURIComponent(instanceId)}`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (aborted) return
+        const list = (data.templates || []) as CloudTemplate[]
+        setTemplates(list)
+        if (list.length > 0 && !selectedTemplateName) {
+          setSelectedTemplateName(list[0].name)
+        }
+      })
+      .catch((e) => console.error('Erro ao carregar templates:', e))
+      .finally(() => !aborted && setLoadingTemplates(false))
+    return () => {
+      aborted = true
+    }
+  }, [isCloud, instanceId])
+
+  // Ajusta array de parâmetros conforme template selecionado
+  useEffect(() => {
+    if (!selectedTemplate) return
+    setTemplateParams((prev) => {
+      const next = [...prev]
+      next.length = selectedTemplate.bodyParamsCount
+      for (let i = 0; i < next.length; i++) if (next[i] === undefined) next[i] = ''
+      return next
+    })
+  }, [selectedTemplate?.name])
 
   // ✅ NOVA FUNÇÃO: Upload de imagem
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>): Promise<void> => {
@@ -152,24 +216,55 @@ export default function NovaCampanhaClient({ user, contatos }: NovaCampanhaClien
     setErrors({})
 
     try {
-      const validated = campanhaSchema.parse({
-        ...formData,
+      // Validação manual: ramo Cloud API exige template; Baileys exige texto.
+      const fieldErrors: FormErrors = {}
+      if (formData.name.trim().length < 3) fieldErrors.name = 'Nome deve ter pelo menos 3 caracteres'
+      if (selectedContacts.length === 0) fieldErrors.contactIds = 'Selecione pelo menos um contato'
+      if (!instanceId) fieldErrors.instanceId = 'Selecione uma instância de envio'
+
+      if (isCloud) {
+        if (!selectedTemplate) {
+          fieldErrors.templateName = 'Selecione um template aprovado'
+        } else if (templateParams.some((p) => !p || p.trim() === '')) {
+          fieldErrors.templateParams = 'Preencha todos os parâmetros do template'
+        }
+      } else {
+        if (formData.message.trim().length < 10) {
+          fieldErrors.message = 'Mensagem deve ter pelo menos 10 caracteres'
+        }
+      }
+
+      if (Object.keys(fieldErrors).length > 0) {
+        setErrors(fieldErrors)
+        setLoading(false)
+        return
+      }
+
+      const payload: Record<string, unknown> = {
+        name: formData.name,
+        scheduledAt: formData.scheduledAt || null,
         contactIds: selectedContacts,
-        imageUrl: imageUrl || undefined,  // ✅ NOVO
-      })
+        status,
+      }
+
+      if (isCloud && selectedTemplate) {
+        payload.templateName = selectedTemplate.name
+        payload.templateLanguage = selectedTemplate.language
+        payload.templateParams = templateParams
+        payload.message = `[template:${selectedTemplate.name}]`
+      } else {
+        payload.message = formData.message
+        if (imageUrl) payload.imageUrl = imageUrl
+      }
 
       const response = await fetch('/api/campanhas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...validated,
-          status,
-          scheduledAt: validated.scheduledAt || null,
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (!response.ok) {
-        const data = await response.json() as { error?: string }
+        const data = (await response.json()) as { error?: string }
         throw new Error(data.error || 'Erro ao criar campanha')
       }
 
@@ -191,6 +286,16 @@ export default function NovaCampanhaClient({ user, contatos }: NovaCampanhaClien
     } finally {
       setLoading(false)
     }
+  }
+
+  const renderTemplatePreview = (): string => {
+    if (!selectedTemplate) return ''
+    let text = selectedTemplate.bodyText
+    templateParams.forEach((value, idx) => {
+      const placeholder = new RegExp(`\\{\\{${idx + 1}\\}\\}`, 'g')
+      text = text.replace(placeholder, value || `{{${idx + 1}}}`)
+    })
+    return text
   }
 
   const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
@@ -289,6 +394,47 @@ export default function NovaCampanhaClient({ user, contatos }: NovaCampanhaClien
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Formulário */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Instância de envio */}
+            <Card className="border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-[#1D2748] flex items-center gap-2">
+                  {isCloud ? <Cloud className="w-5 h-5" /> : <Smartphone className="w-5 h-5" />}
+                  Instância de envio
+                </CardTitle>
+                <CardDescription>
+                  {isCloud
+                    ? 'Cloud API (Meta) — envio business-initiated exige template aprovado.'
+                    : 'Baileys (QR code) — texto livre permitido.'}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {instancias.length === 0 ? (
+                  <p className="text-sm text-red-500 flex items-center gap-1">
+                    <AlertCircle className="w-4 h-4" />
+                    Nenhuma instância ativa. Cadastre uma instância antes de criar campanha.
+                  </p>
+                ) : (
+                  <select
+                    value={instanceId}
+                    onChange={(e) => setInstanceId(e.target.value)}
+                    className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm"
+                  >
+                    {instancias.map((inst) => (
+                      <option key={inst.id} value={inst.id}>
+                        {inst.name} — {inst.provider === 'CLOUD_API' ? 'Cloud API' : 'Baileys'} {inst.phone ? `(${inst.phone})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {errors.instanceId && (
+                  <p className="text-sm text-red-500 flex items-center gap-1">
+                    <AlertCircle className="w-4 h-4" />
+                    {errors.instanceId}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Informações Básicas */}
             <Card className="border-0 shadow-lg">
               <CardHeader>
@@ -313,7 +459,77 @@ export default function NovaCampanhaClient({ user, contatos }: NovaCampanhaClien
                   )}
                 </div>
 
-                {/* ✅ NOVO: Upload de Imagem */}
+                {/* Cloud API: seletor de template */}
+                {isCloud && (
+                  <div className="space-y-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div>
+                      <Label>Template aprovado pela Meta *</Label>
+                      {loadingTemplates ? (
+                        <p className="text-sm text-slate-500 mt-1">Carregando templates...</p>
+                      ) : templates.length === 0 ? (
+                        <p className="text-sm text-red-500 mt-1 flex items-center gap-1">
+                          <AlertCircle className="w-4 h-4" />
+                          Nenhum template APPROVED encontrado pra essa instância.
+                        </p>
+                      ) : (
+                        <select
+                          value={selectedTemplateName}
+                          onChange={(e) => setSelectedTemplateName(e.target.value)}
+                          className="w-full border border-slate-300 rounded-md px-3 py-2 text-sm mt-1"
+                        >
+                          {templates.map((t) => (
+                            <option key={t.id} value={t.name}>
+                              {t.name} ({t.language} · {t.category})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                      {errors.templateName && (
+                        <p className="text-sm text-red-500 mt-1 flex items-center gap-1">
+                          <AlertCircle className="w-4 h-4" />
+                          {errors.templateName}
+                        </p>
+                      )}
+                    </div>
+
+                    {selectedTemplate && selectedTemplate.bodyParamsCount > 0 && (
+                      <div className="space-y-2">
+                        <Label>Parâmetros do template ({selectedTemplate.bodyParamsCount})</Label>
+                        <p className="text-xs text-slate-500">
+                          Pode usar <code>{'{nome}'}</code> e <code>{'{empresa}'}</code> — substituído por contato no envio.
+                        </p>
+                        {Array.from({ length: selectedTemplate.bodyParamsCount }).map((_, idx) => (
+                          <Input
+                            key={idx}
+                            placeholder={`{{${idx + 1}}}`}
+                            value={templateParams[idx] || ''}
+                            onChange={(e) => {
+                              const next = [...templateParams]
+                              next[idx] = e.target.value
+                              setTemplateParams(next)
+                            }}
+                          />
+                        ))}
+                        {errors.templateParams && (
+                          <p className="text-sm text-red-500 flex items-center gap-1">
+                            <AlertCircle className="w-4 h-4" />
+                            {errors.templateParams}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedTemplate && (
+                      <div className="p-3 bg-white border border-slate-200 rounded text-xs whitespace-pre-wrap">
+                        <p className="font-semibold text-slate-700 mb-1">{selectedTemplate.headerText}</p>
+                        <p className="text-slate-700">{renderTemplatePreview()}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Baileys: Upload de Imagem (Cloud API não suporta imagem em template texto) */}
+                {!isCloud && (
                 <div className="space-y-2">
                   <Label htmlFor="image">Imagem da Campanha (Opcional)</Label>
                   
@@ -367,7 +583,10 @@ export default function NovaCampanhaClient({ user, contatos }: NovaCampanhaClien
                     </div>
                   )}
                 </div>
+                )}
 
+                {!isCloud && (
+                <>
                 <div className="space-y-2">
                   <Label htmlFor="message">Mensagem *</Label>
                   <Textarea
@@ -400,6 +619,8 @@ export default function NovaCampanhaClient({ user, contatos }: NovaCampanhaClien
                     </div>
                   </div>
                 </div>
+                </>
+                )}
               </CardContent>
             </Card>
 
@@ -513,8 +734,7 @@ export default function NovaCampanhaClient({ user, contatos }: NovaCampanhaClien
               <CardContent>
                 <div className="bg-gradient-to-br from-green-50 to-green-100/50 rounded-2xl p-4 border border-green-200">
                   <div className="bg-white rounded-xl p-4 shadow-sm space-y-3">
-                    {/* ✅ NOVO: Preview da Imagem */}
-                    {imagePreview && (
+                    {!isCloud && imagePreview && (
                       <Image
                         src={imagePreview}
                         alt="Preview"
@@ -523,11 +743,26 @@ export default function NovaCampanhaClient({ user, contatos }: NovaCampanhaClien
                         className="w-full h-auto rounded-lg"
                       />
                     )}
-                    <p className="text-sm text-slate-700 whitespace-pre-wrap">
-                      {formData.message ? getPreviewMessage() : 'Digite uma mensagem para ver o preview...'}
-                    </p>
+                    {isCloud ? (
+                      selectedTemplate ? (
+                        <>
+                          {selectedTemplate.headerText && (
+                            <p className="text-sm font-semibold text-slate-800">{selectedTemplate.headerText}</p>
+                          )}
+                          <p className="text-sm text-slate-700 whitespace-pre-wrap">{renderTemplatePreview()}</p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-slate-500">Selecione um template para ver o preview...</p>
+                      )
+                    ) : (
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                        {formData.message ? getPreviewMessage() : 'Digite uma mensagem para ver o preview...'}
+                      </p>
+                    )}
                   </div>
-                  <p className="text-xs text-green-700 mt-2 text-center">Exemplo de mensagem no WhatsApp</p>
+                  <p className="text-xs text-green-700 mt-2 text-center">
+                    {isCloud ? 'Mensagem via Cloud API (template)' : 'Exemplo de mensagem no WhatsApp'}
+                  </p>
                 </div>
               </CardContent>
             </Card>
