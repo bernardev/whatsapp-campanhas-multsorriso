@@ -52,6 +52,51 @@ export const messageWorker = new Worker<SendMessageJob>(
           }
         })
         console.log(`[Worker] ✅ Mensagem ${messageId} enviada com sucesso`)
+
+        // Best-effort: registra outbound em ConversationMessage pra aparecer em /conversas.
+        // Evolution v2 NÃO emite messages.upsert pra Cloud API; sem isso, /conversas fica vazio.
+        // Falhas aqui não revertem o envio (Meta já aceitou) — só logam warning.
+        if (provider === 'CLOUD_API') {
+          try {
+            const data = (result.data || {}) as {
+              contacts?: Array<{ wa_id?: string }>
+              messages?: Array<{ id?: string }>
+            }
+            const wamid = data.messages?.[0]?.id
+            const waId = data.contacts?.[0]?.wa_id || phone
+
+            if (wamid) {
+              const instance = await prisma.whatsAppInstance.findUnique({
+                where: { instanceKey },
+                select: { id: true },
+              })
+              if (instance) {
+                const templateText = templateName
+                  ? `[template:${templateName}]${templateParams && templateParams.length ? ' ' + templateParams.join(' | ') : ''}`
+                  : message
+                await prisma.conversationMessage.upsert({
+                  where: { messageId: wamid },
+                  create: {
+                    instanceId: instance.id,
+                    messageId: wamid,
+                    remoteJid: `${waId}@s.whatsapp.net`,
+                    fromMe: true,
+                    messageText: templateText,
+                    messageType: 'template',
+                    timestamp: new Date(),
+                  },
+                  update: {},
+                })
+              }
+            }
+          } catch (convErr) {
+            console.warn(
+              `[Worker] ⚠️ Falha ao registrar ConversationMessage (envio OK):`,
+              convErr instanceof Error ? convErr.message : convErr
+            )
+          }
+        }
+
         return { success: true }
       } else {
         // Falha - marca como FAILED
