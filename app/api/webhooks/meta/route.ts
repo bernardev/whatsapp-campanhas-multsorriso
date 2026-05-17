@@ -21,8 +21,11 @@
 // }
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { cloudinary } from '@/lib/cloudinary'
 
 const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || 'mult_sorriso_verify'
+const META_TOKEN = process.env.META_ACCESS_TOKEN
+const GRAPH_URL = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v21.0'}`
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
@@ -45,6 +48,7 @@ interface MetaMessage {
   text?: { body?: string }
   image?: { caption?: string }
   button?: { text?: string }
+  audio?: { id?: string; mime_type?: string; voice?: boolean }
 }
 interface MetaChangeValue {
   metadata?: { phone_number_id?: string; display_phone_number?: string }
@@ -55,6 +59,67 @@ interface MetaWebhookBody {
   entry?: Array<{
     changes?: Array<{ value?: MetaChangeValue; field?: string }>
   }>
+}
+
+// Baixa um áudio da Meta Cloud API (media_id → URL temporária → binário),
+// hospeda no Cloudinary (com versão .mp3 p/ compatibilidade Safari/iOS) e
+// devolve a URL permanente. Best-effort: qualquer falha retorna null e a
+// conversa segue mostrando "[Áudio]" como texto.
+async function fetchAndStoreMetaAudio(
+  mediaId: string
+): Promise<{ mediaUrl: string; mediaMimeType: string } | null> {
+  try {
+    if (!META_TOKEN) {
+      console.warn('[Meta Audio] META_ACCESS_TOKEN não configurado')
+      return null
+    }
+
+    // 1. media_id → URL temporária + mime
+    const lookup = await fetch(`${GRAPH_URL}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${META_TOKEN}` },
+    })
+    if (!lookup.ok) {
+      console.warn(`[Meta Audio] lookup falhou (${lookup.status}) para ${mediaId}`)
+      return null
+    }
+    const meta = (await lookup.json()) as { url?: string; mime_type?: string }
+    if (!meta.url) return null
+
+    // 2. baixa o binário (mesma autenticação Bearer)
+    const bin = await fetch(meta.url, {
+      headers: { Authorization: `Bearer ${META_TOKEN}` },
+    })
+    if (!bin.ok) {
+      console.warn(`[Meta Audio] download falhou (${bin.status}) para ${mediaId}`)
+      return null
+    }
+    const buffer = Buffer.from(await bin.arrayBuffer())
+    const sourceMime = (meta.mime_type || 'audio/ogg').split(';')[0].trim()
+
+    // 3. hospeda no Cloudinary, gerando uma versão .mp3
+    const upload = await cloudinary.uploader.upload(
+      `data:${sourceMime};base64,${buffer.toString('base64')}`,
+      {
+        resource_type: 'video',
+        folder: 'whatsapp-audios',
+        public_id: mediaId,
+        overwrite: false,
+        eager: [{ format: 'mp3' }],
+      }
+    )
+
+    const mp3Url = upload.eager?.[0]?.secure_url
+    return {
+      mediaUrl: mp3Url || upload.secure_url,
+      mediaMimeType: mp3Url ? 'audio/mpeg' : sourceMime,
+    }
+  } catch (err) {
+    console.warn(
+      '[Meta Audio] Falha ao baixar/hospedar áudio:',
+      err instanceof Error ? err.message : err
+    )
+    return null
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -82,7 +147,18 @@ export async function POST(request: NextRequest) {
             msg.text?.body ||
             msg.image?.caption ||
             msg.button?.text ||
-            `[${msg.type || 'unknown'}]`
+            (msg.type === 'audio' ? '[Áudio]' : `[${msg.type || 'unknown'}]`)
+
+          // Áudio: baixa via Graph API e hospeda no Cloudinary p/ tocar no painel
+          let mediaUrl: string | null = null
+          let mediaMimeType: string | null = null
+          if (msg.type === 'audio' && msg.audio?.id) {
+            const audio = await fetchAndStoreMetaAudio(msg.audio.id)
+            if (audio) {
+              mediaUrl = audio.mediaUrl
+              mediaMimeType = audio.mediaMimeType
+            }
+          }
 
           await prisma.conversationMessage.upsert({
             where: { messageId: msg.id },
@@ -93,6 +169,8 @@ export async function POST(request: NextRequest) {
               fromMe: false,
               messageText,
               messageType: msg.type || 'text',
+              mediaUrl,
+              mediaMimeType,
               timestamp: new Date(parseInt(msg.timestamp) * 1000),
             },
             update: {},
