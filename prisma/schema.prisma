@@ -173,6 +173,8 @@ model ConversationMessage {
   messageText  String   @db.Text   // Texto da mensagem
   messageType  String              // conversation, image, video, etc
   imageUrl     String?             // URL da imagem
+  mediaUrl     String?             // URL permanente de mídia (ex: áudio hospedado no Cloudinary)
+  mediaMimeType String?            // mime type da mídia (ex: audio/mpeg)
   
   // Metadados
   timestamp    DateTime            // Quando a mensagem foi enviada

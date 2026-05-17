@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { MessageStatus } from '@prisma/client'
 import { redisPub, EVENTS_CHANNEL } from '@/lib/redis-pubsub'
+import { cloudinary } from '@/lib/cloudinary'
+
+const EVOLUTION_URL = process.env.EVOLUTION_API_URL
+const EVOLUTION_KEY = process.env.EVOLUTION_API_KEY
 
 interface WebhookBody {
   event: string
@@ -21,6 +25,7 @@ interface WebhookData {
     conversation?: string
     extendedTextMessage?: { text?: string }
     imageMessage?: { caption?: string }
+    audioMessage?: Record<string, unknown>
   }
   messageType?: string
   messageTimestamp?: number
@@ -43,6 +48,64 @@ async function resolveInstance(instanceKey: string) {
     where: { instanceKey },
     select: { id: true, instanceKey: true }
   })
+}
+
+// Baixa o áudio de uma mensagem via Evolution (getBase64FromMediaMessage),
+// hospeda no Cloudinary (com versão .mp3 p/ compatibilidade Safari/iOS) e
+// devolve a URL permanente. Falha aqui é best-effort: retorna null e a
+// conversa segue mostrando "[Áudio]" como texto.
+async function fetchAndStoreAudio(
+  messageId: string,
+  instanceKey: string
+): Promise<{ mediaUrl: string; mediaMimeType: string } | null> {
+  try {
+    if (!EVOLUTION_URL || !EVOLUTION_KEY) return null
+
+    const res = await fetch(
+      `${EVOLUTION_URL}/chat/getBase64FromMediaMessage/${instanceKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: EVOLUTION_KEY,
+        },
+        body: JSON.stringify({ message: { key: { id: messageId } } }),
+      }
+    )
+
+    if (!res.ok) {
+      console.warn(`[Audio] getBase64 falhou (${res.status}) para ${messageId}`)
+      return null
+    }
+
+    const data = (await res.json()) as { base64?: string; mimetype?: string }
+    if (!data.base64) return null
+
+    const sourceMime = data.mimetype || 'audio/ogg'
+
+    const upload = await cloudinary.uploader.upload(
+      `data:${sourceMime};base64,${data.base64}`,
+      {
+        resource_type: 'video',
+        folder: 'whatsapp-audios',
+        public_id: messageId,
+        overwrite: false,
+        eager: [{ format: 'mp3' }],
+      }
+    )
+
+    const mp3Url = upload.eager?.[0]?.secure_url
+    return {
+      mediaUrl: mp3Url || upload.secure_url,
+      mediaMimeType: mp3Url ? 'audio/mpeg' : sourceMime,
+    }
+  } catch (err) {
+    console.warn(
+      '[Audio] Falha ao baixar/hospedar áudio:',
+      err instanceof Error ? err.message : err
+    )
+    return null
+  }
 }
 
 async function createOrUpdateLead(remoteJid: string): Promise<void> {
@@ -109,7 +172,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const instanceId = dbInstance.id
 
     if (event === 'messages.upsert') {
-      await saveToConversationHistory(data, instanceId)
+      await saveToConversationHistory(data, instanceId, instance)
     }
 
     if (event === 'messages.update') {
@@ -137,7 +200,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 async function saveToConversationHistory(
   data: WebhookData,
-  instanceId: string
+  instanceId: string,
+  instanceKey: string
 ): Promise<void> {
   try {
     const messageId = data.key?.id
@@ -154,11 +218,14 @@ async function saveToConversationHistory(
       return
     }
 
+    const isAudio =
+      messageType === 'audioMessage' || !!data.message?.audioMessage
+
     const messageText =
       data.message?.conversation ||
       data.message?.extendedTextMessage?.text ||
       data.message?.imageMessage?.caption ||
-      '[Mídia ou mensagem não suportada]'
+      (isAudio ? '[Áudio]' : '[Mídia ou mensagem não suportada]')
 
     let imageUrl: string | null = null
     if (messageType === 'imageMessage' && data.message?.imageMessage && fromMe) {
@@ -191,6 +258,17 @@ async function saveToConversationHistory(
       return
     }
 
+    // Mensagens de áudio: baixa e hospeda no Cloudinary p/ tocar no painel.
+    let mediaUrl: string | null = null
+    let mediaMimeType: string | null = null
+    if (isAudio) {
+      const audio = await fetchAndStoreAudio(messageId, instanceKey)
+      if (audio) {
+        mediaUrl = audio.mediaUrl
+        mediaMimeType = audio.mediaMimeType
+      }
+    }
+
     await prisma.conversationMessage.create({
       data: {
         instanceId: instanceId,
@@ -202,6 +280,8 @@ async function saveToConversationHistory(
         messageText,
         messageType,
         imageUrl,
+        mediaUrl,
+        mediaMimeType,
         timestamp: new Date(timestamp * 1000),
         source
       }

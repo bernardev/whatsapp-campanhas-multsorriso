@@ -25,6 +25,13 @@ interface Message {
   fromMe: boolean
   timestamp: Date
   pushName: string | null
+  messageType?: string
+  mediaUrl?: string | null
+  mediaMimeType?: string | null
+}
+
+function isAudioMessage(msg: Message): boolean {
+  return msg.messageType === 'audioMessage' || msg.messageType === 'audio'
 }
 
 interface Conversa {
@@ -672,9 +679,18 @@ export default function ConversasPage() {
                           {msg.pushName}
                         </p>
                       )}
-                      <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
-                        {msg.messageText}
-                      </p>
+                      {isAudioMessage(msg) && msg.mediaUrl ? (
+                        <audio
+                          controls
+                          src={msg.mediaUrl}
+                          preload="none"
+                          className="w-60 max-w-full"
+                        />
+                      ) : (
+                        <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                          {isAudioMessage(msg) ? '🎤 [Áudio indisponível]' : msg.messageText}
+                        </p>
+                      )}
                       <p className={`text-xs mt-1.5 ${msg.fromMe ? 'text-white/80' : 'text-slate-500'}`}>
                         {formatTime(msg.timestamp)}
                       </p>

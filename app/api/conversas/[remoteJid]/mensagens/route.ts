@@ -45,6 +45,8 @@ export async function GET(
       timestamp: msg.timestamp,
       pushName: msg.pushName,
       messageType: msg.messageType,
+      mediaUrl: msg.mediaUrl,
+      mediaMimeType: msg.mediaMimeType,
     }))
 
     return NextResponse.json({
