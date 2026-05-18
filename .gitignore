@@ -48,3 +48,4 @@ next-env.d.ts
 /scripts/inspect-queue.ts
 /scripts/reset-campaign.ts
 /scripts/wipe-conversas.ts
+pnpm-lock.yaml

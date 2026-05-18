@@ -12,68 +12,81 @@ interface CampaignStats {
   delivered: number
   read: number
   failed: number
+  responded: number
+}
+
+// Telefones BR podem ter ou não o 9º dígito (após 55 + DDD). Gera as duas
+// formas para casar o telefone do contato com o remoteJid das conversas.
+function digitVariants(digits: string): string[] {
+  const set = new Set<string>([digits])
+  if (digits.length === 12) {
+    set.add(digits.slice(0, 4) + '9' + digits.slice(4))
+  }
+  if (digits.length === 13 && digits[4] === '9') {
+    set.add(digits.slice(0, 4) + digits.slice(5))
+  }
+  return [...set]
 }
 
 export async function GET(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> } // ✅ Promise!
+  context: { params: Promise<{ id: string }> }
 ): Promise<Response> {
-  // ✅ Await params!
   const { id: campaignId } = await context.params
-
-  console.log('📡 [SSE] Iniciando stream para campanha:', campaignId)
 
   if (!campaignId) {
     return new Response('Campaign ID is required', { status: 400 })
   }
 
-  // Cria stream SSE
   const encoder = new TextEncoder()
-  
+
   const stream = new ReadableStream({
     async start(controller) {
       let intervalId: NodeJS.Timeout | null = null
-      
-      // Função para enviar dados
+
       const sendUpdate = async (): Promise<void> => {
         try {
-          console.log('🔄 [SSE] Buscando dados da campanha:', campaignId)
-          
-          // Busca campanha
           const campaign = await prisma.campaign.findUnique({
             where: { id: campaignId },
             include: {
               messages: {
-                include: {
-                  contact: true
-                },
-                orderBy: {
-                  createdAt: 'desc'
-                }
-              }
-            }
+                include: { contact: true },
+                orderBy: { createdAt: 'desc' },
+              },
+            },
           })
 
           if (!campaign) {
-            console.error('❌ [SSE] Campanha não encontrada:', campaignId)
             controller.close()
             if (intervalId) clearInterval(intervalId)
             return
           }
 
-          // Calcula estatísticas
-          const stats: CampaignStats = {
-            total: campaign.messages.length,
-            pending: campaign.messages.filter(m => m.status === 'PENDING').length,
-            sending: campaign.messages.filter(m => m.status === 'SENDING').length,
-            sent: campaign.messages.filter(m => m.status === 'SENT').length,
-            delivered: campaign.messages.filter(m => m.status === 'DELIVERED').length,
-            read: campaign.messages.filter(m => m.status === 'READ').length,
-            failed: campaign.messages.filter(m => m.status === 'FAILED').length,
+          // Descobre quais contatos responderam após o início da campanha:
+          // casa o telefone do contato com o remoteJid das mensagens recebidas.
+          const jidsByMessage = new Map<string, string[]>()
+          const allJids = new Set<string>()
+          for (const msg of campaign.messages) {
+            const digits = msg.contact.phone.replace(/\D/g, '')
+            const jids = digitVariants(digits).map((v) => `${v}@s.whatsapp.net`)
+            jidsByMessage.set(msg.id, jids)
+            jids.forEach((j) => allJids.add(j))
           }
 
-          // Formata mensagens
-          const messages = campaign.messages.map(msg => ({
+          const respondedJids = new Set<string>()
+          if (allJids.size > 0) {
+            const inbound = await prisma.conversationMessage.findMany({
+              where: {
+                remoteJid: { in: [...allJids] },
+                fromMe: false,
+                timestamp: { gte: campaign.createdAt },
+              },
+              select: { remoteJid: true },
+            })
+            inbound.forEach((m) => respondedJids.add(m.remoteJid))
+          }
+
+          const messages = campaign.messages.map((msg) => ({
             id: msg.id,
             phone: msg.contact.phone,
             name: msg.contact.name,
@@ -82,25 +95,36 @@ export async function GET(
             deliveredAt: msg.deliveredAt,
             readAt: msg.readAt,
             errorMsg: msg.errorMsg,
-            createdAt: msg.createdAt
+            createdAt: msg.createdAt,
+            responded: (jidsByMessage.get(msg.id) || []).some((j) =>
+              respondedJids.has(j)
+            ),
           }))
 
-          // Envia dados via SSE
+          const stats: CampaignStats = {
+            total: messages.length,
+            pending: messages.filter((m) => m.status === 'PENDING').length,
+            sending: messages.filter((m) => m.status === 'SENDING').length,
+            sent: messages.filter((m) => m.status === 'SENT').length,
+            delivered: messages.filter((m) => m.status === 'DELIVERED').length,
+            read: messages.filter((m) => m.status === 'READ').length,
+            failed: messages.filter((m) => m.status === 'FAILED').length,
+            responded: messages.filter((m) => m.responded).length,
+          }
+
           const data = JSON.stringify({
             campaign: {
               id: campaign.id,
               name: campaign.name,
-              status: campaign.status
+              status: campaign.status,
+              createdAt: campaign.createdAt,
+              templateName: campaign.templateName,
             },
             stats,
-            messages
+            messages,
           })
 
-          controller.enqueue(
-            encoder.encode(`data: ${data}\n\n`)
-          )
-
-          console.log('✅ [SSE] Update enviado:', stats)
+          controller.enqueue(encoder.encode(`data: ${data}\n\n`))
         } catch (error) {
           console.error('❌ [SSE] Erro ao enviar update:', error)
           controller.error(error)
@@ -108,27 +132,22 @@ export async function GET(
         }
       }
 
-      // Envia primeiro update
       await sendUpdate()
-
-      // Atualiza a cada 2 segundos
       intervalId = setInterval(sendUpdate, 2000)
 
-      // Limpa ao fechar conexão
       request.signal.addEventListener('abort', () => {
-        console.log('🔌 [SSE] Conexão fechada pelo cliente')
         if (intervalId) clearInterval(intervalId)
         controller.close()
       })
-    }
+    },
   })
 
   return new Response(stream, {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
-      'X-Accel-Buffering': 'no'
-    }
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
   })
 }
