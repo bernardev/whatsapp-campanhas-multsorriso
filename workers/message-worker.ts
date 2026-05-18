@@ -43,12 +43,22 @@ export const messageWorker = new Worker<SendMessageJob>(
           : await sendTextMessage(instanceKey, phone, message)
 
       if (result.success) {
+        // wamid (Cloud API): ID da mensagem na Meta. Guardado na Message para
+        // casar os callbacks de status (delivered/read) que chegam no webhook.
+        const cloudData = (result.data || {}) as {
+          contacts?: Array<{ wa_id?: string }>
+          messages?: Array<{ id?: string }>
+        }
+        const wamid =
+          provider === 'CLOUD_API' ? cloudData.messages?.[0]?.id : undefined
+
         // Sucesso - atualiza para SENT
         await prisma.message.update({
           where: { id: messageId },
           data: {
             status: 'SENT',
-            sentAt: new Date()
+            sentAt: new Date(),
+            ...(wamid ? { providerMessageId: wamid } : {}),
           }
         })
         console.log(`[Worker] ✅ Mensagem ${messageId} enviada com sucesso`)
@@ -58,12 +68,7 @@ export const messageWorker = new Worker<SendMessageJob>(
         // Falhas aqui não revertem o envio (Meta já aceitou) — só logam warning.
         if (provider === 'CLOUD_API') {
           try {
-            const data = (result.data || {}) as {
-              contacts?: Array<{ wa_id?: string }>
-              messages?: Array<{ id?: string }>
-            }
-            const wamid = data.messages?.[0]?.id
-            const waId = data.contacts?.[0]?.wa_id || phone
+            const waId = cloudData.contacts?.[0]?.wa_id || phone
 
             if (wamid) {
               const instance = await prisma.whatsAppInstance.findUnique({

@@ -113,6 +113,9 @@ model Message {
   deliveredAt DateTime?
   readAt      DateTime?
   errorMsg    String?       @db.Text
+
+  // wamid da Meta (Cloud API) — casa os callbacks de status delivered/read
+  providerMessageId String?
   
   campaign    Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   contact     Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
@@ -125,6 +128,7 @@ model Message {
   @@index([contactId])
   @@index([status])
   @@index([instanceId])
+  @@index([providerMessageId])
 }
 
 // ========== INSTÂNCIAS WHATSAPP ==========

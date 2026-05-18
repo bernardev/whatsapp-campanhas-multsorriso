@@ -22,6 +22,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { cloudinary } from '@/lib/cloudinary'
+import { MessageStatus } from '@prisma/client'
 
 const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || 'mult_sorriso_verify'
 const META_TOKEN = process.env.META_ACCESS_TOKEN
@@ -53,10 +54,17 @@ interface MetaMessage {
   button?: { text?: string }
   audio?: { id?: string; mime_type?: string; voice?: boolean }
 }
+interface MetaStatus {
+  id?: string            // wamid da mensagem enviada
+  status?: string        // sent | delivered | read | failed
+  timestamp?: string
+  recipient_id?: string
+}
 interface MetaChangeValue {
   metadata?: { phone_number_id?: string; display_phone_number?: string }
   contacts?: MetaContact[]
   messages?: MetaMessage[]
+  statuses?: MetaStatus[]
 }
 interface MetaWebhookBody {
   entry?: Array<{
@@ -123,6 +131,64 @@ async function fetchAndStoreMetaAudio(
     )
     return null
   }
+}
+
+// Ranking p/ não rebaixar status (ex.: 'delivered' chegando depois de 'read').
+const STATUS_RANK: Record<string, number> = {
+  PENDING: 0,
+  QUEUED: 1,
+  SENDING: 2,
+  SENT: 3,
+  DELIVERED: 4,
+  READ: 5,
+  FAILED: 3,
+}
+
+// Aplica um callback de status da Meta na Message correspondente (casada pelo
+// wamid). É o que mantém o contador "Entregues" do dashboard correto.
+async function applyMetaStatus(
+  wamid: string,
+  metaStatus: string,
+  ts?: string
+): Promise<void> {
+  const map: Record<string, MessageStatus> = {
+    sent: MessageStatus.SENT,
+    delivered: MessageStatus.DELIVERED,
+    read: MessageStatus.READ,
+    failed: MessageStatus.FAILED,
+  }
+  const newStatus = map[metaStatus]
+  if (!newStatus) return
+
+  const message = await prisma.message.findFirst({
+    where: { providerMessageId: wamid },
+    select: { id: true, status: true },
+  })
+  if (!message) return
+
+  // 'failed' não sobrescreve algo já entregue/lido; os demais nunca rebaixam.
+  if (newStatus === MessageStatus.FAILED) {
+    if (
+      message.status === MessageStatus.DELIVERED ||
+      message.status === MessageStatus.READ
+    ) {
+      return
+    }
+  } else if (
+    (STATUS_RANK[newStatus] ?? 0) <= (STATUS_RANK[message.status] ?? 0)
+  ) {
+    return
+  }
+
+  const when = ts ? new Date(parseInt(ts) * 1000) : new Date()
+  await prisma.message.update({
+    where: { id: message.id },
+    data: {
+      status: newStatus,
+      ...(newStatus === MessageStatus.DELIVERED ? { deliveredAt: when } : {}),
+      ...(newStatus === MessageStatus.READ ? { readAt: when } : {}),
+    },
+  })
 }
 
 export async function POST(request: NextRequest) {
@@ -198,6 +264,12 @@ export async function POST(request: NextRequest) {
               lastMessageAt: new Date(parseInt(msg.timestamp) * 1000),
             },
           })
+        }
+
+        // Callbacks de status de mensagens enviadas (sent/delivered/read/failed)
+        for (const st of value.statuses || []) {
+          if (!st.id || !st.status) continue
+          await applyMetaStatus(st.id, st.status, st.timestamp)
         }
 
       }
