@@ -45,12 +45,24 @@ export const messageWorker = new Worker<SendMessageJob>(
       if (result.success) {
         // wamid (Cloud API): ID da mensagem na Meta. Guardado na Message para
         // casar os callbacks de status (delivered/read) que chegam no webhook.
+        // A Evolution normaliza a resposta em { key: { id } }; o formato cru
+        // da Meta usa { messages: [{ id }] }. Cobrimos os dois.
         const cloudData = (result.data || {}) as {
+          key?: { id?: string }
           contacts?: Array<{ wa_id?: string }>
           messages?: Array<{ id?: string }>
         }
         const wamid =
-          provider === 'CLOUD_API' ? cloudData.messages?.[0]?.id : undefined
+          provider === 'CLOUD_API'
+            ? cloudData.key?.id || cloudData.messages?.[0]?.id
+            : undefined
+
+        if (provider === 'CLOUD_API' && !wamid) {
+          console.warn(
+            '[Worker] ⚠️ wamid não encontrado na resposta da Evolution:',
+            JSON.stringify(result.data)
+          )
+        }
 
         // Sucesso - atualiza para SENT
         await prisma.message.update({
