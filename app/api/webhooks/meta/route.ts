@@ -39,7 +39,10 @@ export async function GET(request: NextRequest) {
   return new NextResponse('Forbidden', { status: 403 })
 }
 
-interface MetaContact { wa_id?: string }
+interface MetaContact {
+  wa_id?: string
+  profile?: { name?: string }
+}
 interface MetaMessage {
   id?: string
   from?: string
@@ -160,6 +163,12 @@ export async function POST(request: NextRequest) {
             }
           }
 
+          // Nome do perfil do WhatsApp de quem enviou
+          const pushName =
+            value.contacts?.find((c) => c.wa_id === msg.from)?.profile?.name ||
+            value.contacts?.[0]?.profile?.name ||
+            null
+
           await prisma.conversationMessage.upsert({
             where: { messageId: msg.id },
             create: {
@@ -167,6 +176,7 @@ export async function POST(request: NextRequest) {
               messageId: msg.id,
               remoteJid: `${msg.from}@s.whatsapp.net`,
               fromMe: false,
+              pushName,
               messageText,
               messageType: msg.type || 'text',
               mediaUrl,
