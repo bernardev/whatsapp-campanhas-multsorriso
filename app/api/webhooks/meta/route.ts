@@ -133,6 +133,18 @@ async function fetchAndStoreMetaAudio(
   }
 }
 
+// Telefones BR podem ter ou não o 9º dígito (após 55 + DDD).
+function digitVariants(digits: string): string[] {
+  const set = new Set<string>([digits])
+  if (digits.length === 12) {
+    set.add(digits.slice(0, 4) + '9' + digits.slice(4))
+  }
+  if (digits.length === 13 && digits[4] === '9') {
+    set.add(digits.slice(0, 4) + digits.slice(5))
+  }
+  return [...set]
+}
+
 // Ranking p/ não rebaixar status (ex.: 'delivered' chegando depois de 'read').
 const STATUS_RANK: Record<string, number> = {
   PENDING: 0,
@@ -144,12 +156,15 @@ const STATUS_RANK: Record<string, number> = {
   FAILED: 3,
 }
 
-// Aplica um callback de status da Meta na Message correspondente (casada pelo
-// wamid). É o que mantém o contador "Entregues" do dashboard correto.
+// Aplica um callback de status da Meta na Message correspondente. Casa
+// primeiro pelo wamid (preciso); se não achar — a resposta de envio da
+// Evolution é instável e nem sempre salva o wamid — cai num plano B que casa
+// pelo telefone do destinatário. É o que mantém o contador "Entregues" correto.
 async function applyMetaStatus(
   wamid: string,
   metaStatus: string,
-  ts?: string
+  ts?: string,
+  recipientId?: string
 ): Promise<void> {
   const map: Record<string, MessageStatus> = {
     sent: MessageStatus.SENT,
@@ -160,10 +175,29 @@ async function applyMetaStatus(
   const newStatus = map[metaStatus]
   if (!newStatus) return
 
-  const message = await prisma.message.findFirst({
+  // 1) Casamento preciso pelo wamid
+  let message = await prisma.message.findFirst({
     where: { providerMessageId: wamid },
     select: { id: true, status: true },
   })
+
+  // 2) Plano B: casa pelo telefone do destinatário — pega a mensagem mais
+  //    recente daquele contato ainda não finalizada.
+  if (!message && recipientId) {
+    const phones = digitVariants(recipientId.replace(/\D/g, '')).flatMap((d) => [
+      d,
+      '+' + d,
+    ])
+    message = await prisma.message.findFirst({
+      where: {
+        contact: { phone: { in: phones } },
+        status: { in: ['PENDING', 'SENDING', 'SENT', 'DELIVERED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, status: true },
+    })
+  }
+
   if (!message) return
 
   // 'failed' não sobrescreve algo já entregue/lido; os demais nunca rebaixam.
@@ -269,7 +303,7 @@ export async function POST(request: NextRequest) {
         // Callbacks de status de mensagens enviadas (sent/delivered/read/failed)
         for (const st of value.statuses || []) {
           if (!st.id || !st.status) continue
-          await applyMetaStatus(st.id, st.status, st.timestamp)
+          await applyMetaStatus(st.id, st.status, st.timestamp, st.recipient_id)
         }
 
       }
