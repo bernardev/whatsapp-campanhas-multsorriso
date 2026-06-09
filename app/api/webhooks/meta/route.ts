@@ -54,11 +54,19 @@ interface MetaMessage {
   button?: { text?: string }
   audio?: { id?: string; mime_type?: string; voice?: boolean }
 }
+interface MetaStatusError {
+  code?: number
+  title?: string
+  message?: string
+  error_data?: { details?: string }
+  href?: string
+}
 interface MetaStatus {
   id?: string            // wamid da mensagem enviada
   status?: string        // sent | delivered | read | failed
   timestamp?: string
   recipient_id?: string
+  errors?: MetaStatusError[]   // presente quando status=failed
 }
 interface MetaChangeValue {
   metadata?: { phone_number_id?: string; display_phone_number?: string }
@@ -164,7 +172,8 @@ async function applyMetaStatus(
   wamid: string,
   metaStatus: string,
   ts?: string,
-  recipientId?: string
+  recipientId?: string,
+  errors?: MetaStatusError[]
 ): Promise<void> {
   const map: Record<string, MessageStatus> = {
     sent: MessageStatus.SENT,
@@ -215,12 +224,28 @@ async function applyMetaStatus(
   }
 
   const when = ts ? new Date(parseInt(ts) * 1000) : new Date()
+
+  // Quando a Meta marca failed, ela passa um array `errors` com code/title/details.
+  // Serializamos pra Message.errorMsg pra dar contexto ao diagnóstico (Undeliverable,
+  // Rate Limit Pair, Re-engagement etc). Sem isso o painel mostra FAILED sem motivo.
+  let errorMsg: string | undefined
+  if (newStatus === MessageStatus.FAILED && errors && errors.length > 0) {
+    const e = errors[0]
+    const parts = [
+      e.code ? `#${e.code}` : null,
+      e.title || e.message,
+      e.error_data?.details,
+    ].filter((p): p is string => Boolean(p))
+    errorMsg = parts.join(' — ') || JSON.stringify(e)
+  }
+
   await prisma.message.update({
     where: { id: message.id },
     data: {
       status: newStatus,
       ...(newStatus === MessageStatus.DELIVERED ? { deliveredAt: when } : {}),
       ...(newStatus === MessageStatus.READ ? { readAt: when } : {}),
+      ...(errorMsg ? { errorMsg } : {}),
     },
   })
 }
@@ -303,7 +328,13 @@ export async function POST(request: NextRequest) {
         // Callbacks de status de mensagens enviadas (sent/delivered/read/failed)
         for (const st of value.statuses || []) {
           if (!st.id || !st.status) continue
-          await applyMetaStatus(st.id, st.status, st.timestamp, st.recipient_id)
+          await applyMetaStatus(
+            st.id,
+            st.status,
+            st.timestamp,
+            st.recipient_id,
+            st.errors
+          )
         }
 
       }
