@@ -91,17 +91,29 @@ export async function sendTemplateMessage(
   phone: string,
   templateName: string,
   language: string,
-  bodyParams: string[] = []
+  bodyParams: string[] = [],
+  headerImageUrl?: string
 ): Promise<EvolutionResponse> {
-  console.log(`[Evolution] Template ${templateName} via ${instanceKey} → ${phone}`)
+  console.log(`[Evolution] Template ${templateName} via ${instanceKey} → ${phone}${headerImageUrl ? ' (header IMAGE)' : ''}`)
 
   try {
-    const components = bodyParams.length > 0
-      ? [{
-          type: 'body',
-          parameters: bodyParams.map(text => ({ type: 'text', text })),
-        }]
-      : []
+    const components: Array<Record<string, unknown>> = []
+
+    if (headerImageUrl) {
+      components.push({
+        type: 'header',
+        parameters: [
+          { type: 'image', image: { link: headerImageUrl } },
+        ],
+      })
+    }
+
+    if (bodyParams.length > 0) {
+      components.push({
+        type: 'body',
+        parameters: bodyParams.map((text) => ({ type: 'text', text })),
+      })
+    }
 
     const response = await evolutionAPI.post(
       `/message/sendTemplate/${instanceKey}`,

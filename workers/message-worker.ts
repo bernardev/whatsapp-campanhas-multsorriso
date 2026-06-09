@@ -18,6 +18,7 @@ export const messageWorker = new Worker<SendMessageJob>(
       templateName,
       templateLanguage,
       templateParams,
+      templateHeaderImageUrl,
     } = job.data
 
     console.log(`[Worker] Processando mensagem ${messageId} para ${phone} (${provider || 'BAILEYS'})`)
@@ -38,7 +39,8 @@ export const messageWorker = new Worker<SendMessageJob>(
               phone,
               templateName,
               templateLanguage,
-              templateParams || []
+              templateParams || [],
+              templateHeaderImageUrl
             )
           : await sendTextMessage(instanceKey, phone, message)
 

@@ -54,6 +54,8 @@ interface CloudTemplate {
   bodyParamsCount: number
   bodyText: string
   headerText: string
+  // TEXT | IMAGE | VIDEO | DOCUMENT | null — quando IMAGE o form exige upload
+  headerFormat: string | null
 }
 
 interface NovaCampanhaClientProps {
@@ -105,6 +107,8 @@ export default function NovaCampanhaClient({ user, contatos, instancias }: NovaC
   const [selectedTemplateName, setSelectedTemplateName] = useState<string>('')
   const selectedTemplate = templates.find((t) => t.name === selectedTemplateName) || null
   const [templateParams, setTemplateParams] = useState<string[]>([])
+  const requiresHeaderImage =
+    isCloud && selectedTemplate?.headerFormat === 'IMAGE'
 
   // Carrega templates da Meta quando a instância selecionada for Cloud API
   useEffect(() => {
@@ -227,6 +231,8 @@ export default function NovaCampanhaClient({ user, contatos, instancias }: NovaC
           fieldErrors.templateName = 'Selecione um template aprovado'
         } else if (templateParams.some((p) => !p || p.trim() === '')) {
           fieldErrors.templateParams = 'Preencha todos os parâmetros do template'
+        } else if (requiresHeaderImage && !imageUrl) {
+          fieldErrors.imageUrl = 'Este template tem header IMAGE — faça upload da imagem'
         }
       } else {
         if (formData.message.trim().length < 10) {
@@ -252,6 +258,7 @@ export default function NovaCampanhaClient({ user, contatos, instancias }: NovaC
         payload.templateLanguage = selectedTemplate.language
         payload.templateParams = templateParams
         payload.message = `[template:${selectedTemplate.name}]`
+        if (requiresHeaderImage && imageUrl) payload.imageUrl = imageUrl
       } else {
         payload.message = formData.message
         if (imageUrl) payload.imageUrl = imageUrl
@@ -528,10 +535,20 @@ export default function NovaCampanhaClient({ user, contatos, instancias }: NovaC
                   </div>
                 )}
 
-                {/* Baileys: Upload de Imagem (Cloud API não suporta imagem em template texto) */}
-                {!isCloud && (
+                {/* Upload de imagem: Baileys (opcional) ou Cloud API quando o
+                    template tem header IMAGE (obrigatório). */}
+                {(!isCloud || requiresHeaderImage) && (
                 <div className="space-y-2">
-                  <Label htmlFor="image">Imagem da Campanha (Opcional)</Label>
+                  <Label htmlFor="image">
+                    {requiresHeaderImage
+                      ? 'Imagem do header do template *'
+                      : 'Imagem da Campanha (Opcional)'}
+                  </Label>
+                  {requiresHeaderImage && (
+                    <p className="text-xs text-amber-700">
+                      Template <code>{selectedTemplate?.name}</code> tem header IMAGE — esta imagem entra no envio (mesma proporção da que você aprovou na Meta).
+                    </p>
+                  )}
                   
                   {!imagePreview ? (
                     <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-[#BD8F29] transition-colors">
@@ -581,6 +598,12 @@ export default function NovaCampanhaClient({ user, contatos, instancias }: NovaC
                         Imagem carregada com sucesso!
                       </p>
                     </div>
+                  )}
+                  {errors.imageUrl && (
+                    <p className="text-sm text-red-500 flex items-center gap-1">
+                      <AlertCircle className="w-4 h-4" />
+                      {errors.imageUrl}
+                    </p>
                   )}
                 </div>
                 )}
@@ -734,7 +757,7 @@ export default function NovaCampanhaClient({ user, contatos, instancias }: NovaC
               <CardContent>
                 <div className="bg-gradient-to-br from-green-50 to-green-100/50 rounded-2xl p-4 border border-green-200">
                   <div className="bg-white rounded-xl p-4 shadow-sm space-y-3">
-                    {!isCloud && imagePreview && (
+                    {(!isCloud || requiresHeaderImage) && imagePreview && (
                       <Image
                         src={imagePreview}
                         alt="Preview"

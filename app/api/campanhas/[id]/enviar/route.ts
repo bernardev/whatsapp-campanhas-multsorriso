@@ -153,6 +153,12 @@ export async function POST(
           templateName: campaign.templateName || undefined,
           templateLanguage: campaign.templateLanguage || undefined,
           templateParams: isCloud ? personalizedParams : undefined,
+          // Em Cloud API a imageUrl da campanha vira media do header IMAGE
+          // do template aprovado (ex.: dia_dos_namorados). Em Baileys ela
+          // já é usada via sendMedia no fluxo legado, então só preenche aqui
+          // quando o provider for Cloud API.
+          templateHeaderImageUrl:
+            isCloud && campaign.imageUrl ? campaign.imageUrl : undefined,
         },
         {
           delay: messagesCreated * parseInt(process.env.DELAY_BETWEEN_MESSAGES || '3000'),

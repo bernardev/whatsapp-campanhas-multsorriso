@@ -96,17 +96,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const templates = list
       .filter((t) => t.status === 'APPROVED')
-      .map((t) => ({
-        id: t.id,
-        name: t.name,
-        language: t.language,
-        category: t.category,
-        bodyParamsCount: countBodyParams(t),
-        bodyText:
-          t.components.find((c) => c.type === 'BODY')?.text || '',
-        headerText:
-          t.components.find((c) => c.type === 'HEADER')?.text || '',
-      }))
+      .map((t) => {
+        const header = t.components.find((c) => c.type === 'HEADER')
+        return {
+          id: t.id,
+          name: t.name,
+          language: t.language,
+          category: t.category,
+          bodyParamsCount: countBodyParams(t),
+          bodyText:
+            t.components.find((c) => c.type === 'BODY')?.text || '',
+          headerText: header?.text || '',
+          // TEXT | IMAGE | VIDEO | DOCUMENT — quando IMAGE/VIDEO/DOCUMENT
+          // o envio precisa de uma media URL pública em components.header.parameters
+          headerFormat: (header?.format as string | undefined) || null,
+        }
+      })
 
     return NextResponse.json({ templates })
   } catch (error) {

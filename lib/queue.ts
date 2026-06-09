@@ -15,6 +15,9 @@ export interface SendMessageJob {
   templateName?: string
   templateLanguage?: string
   templateParams?: string[]
+  // URL pública da imagem pro header IMAGE de templates Cloud API.
+  // Quando preenchido, vai como components[0].parameters[0].image.link no sendTemplate.
+  templateHeaderImageUrl?: string
 }
 
 // Cria a fila de mensagens
