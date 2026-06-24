@@ -23,7 +23,9 @@ import {
   Bell,
   Check,
   Smartphone,
-  UserCog
+  UserCog,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react'
 import { MessageStatus as PrismaMessageStatus, CampaignStatus } from '@prisma/client'
 
@@ -60,6 +62,12 @@ interface DashboardClientProps {
     taxaEntrega: number
   }
   campanhas: Campaign[]
+  pagination: {
+    currentPage: number
+    totalPages: number
+    totalItems: number
+    pageSize: number
+  }
 }
 
 // ✅ ADICIONADO: Interface de Notificação
@@ -74,7 +82,7 @@ interface Notificacao {
   timestamp: Date
 }
 
-export default function DashboardClient({ user, stats, campanhas }: DashboardClientProps) {
+export default function DashboardClient({ user, stats, campanhas, pagination }: DashboardClientProps) {
   const router = useRouter()
   const pathname = usePathname()
   const [loadingCampaignId, setLoadingCampaignId] = useState<string | null>(null)
@@ -109,6 +117,13 @@ useEffect(() => {
 
   const handleNovaCampanha = (): void => {
     router.push('/campanhas/nova')
+  }
+
+  const irParaPagina = (pagina: number): void => {
+    if (pagina < 1 || pagina > pagination.totalPages || pagina === pagination.currentPage) {
+      return
+    }
+    router.push(`/campanhas?page=${pagina}`)
   }
 
   const handleEnviarCampanha = async (campaignId: string): Promise<void> => {
@@ -697,8 +712,8 @@ useEffect(() => {
               {campanhas.length > 0 ? 'Campanhas Recentes' : 'Suas Campanhas'}
             </h2>
             <p className="text-slate-500 text-sm">
-              {campanhas.length > 0 
-                ? `${campanhas.length} campanha${campanhas.length > 1 ? 's' : ''} encontrada${campanhas.length > 1 ? 's' : ''}`
+              {pagination.totalItems > 0
+                ? `${pagination.totalItems} campanha${pagination.totalItems > 1 ? 's' : ''} no total · página ${pagination.currentPage} de ${pagination.totalPages}`
                 : 'Comece criando sua primeira campanha'
               }
             </p>
@@ -715,6 +730,7 @@ useEffect(() => {
 
         {/* Tabela ou Empty State */}
         {campanhas.length > 0 ? (
+          <>
           <Card className="border-0 shadow-xl shadow-slate-200/50 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -829,6 +845,83 @@ useEffect(() => {
               </table>
             </div>
           </Card>
+
+          {/* Controles de Paginação */}
+          {pagination.totalPages > 1 && (
+            <div className="mt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <p className="text-sm text-slate-500">
+                Mostrando{' '}
+                <span className="font-semibold text-slate-700">
+                  {(pagination.currentPage - 1) * pagination.pageSize + 1}
+                </span>
+                {' '}–{' '}
+                <span className="font-semibold text-slate-700">
+                  {Math.min(pagination.currentPage * pagination.pageSize, pagination.totalItems)}
+                </span>
+                {' '}de{' '}
+                <span className="font-semibold text-slate-700">{pagination.totalItems}</span>
+              </p>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => irParaPagina(pagination.currentPage - 1)}
+                  disabled={pagination.currentPage <= 1}
+                  className="border-slate-200"
+                >
+                  <ChevronLeft className="w-4 h-4 mr-1" />
+                  Anterior
+                </Button>
+
+                {Array.from({ length: pagination.totalPages }, (_, i) => i + 1)
+                  .filter(
+                    (p) =>
+                      p === 1 ||
+                      p === pagination.totalPages ||
+                      Math.abs(p - pagination.currentPage) <= 1
+                  )
+                  .reduce<(number | 'ellipsis')[]>((acc, p, idx, arr) => {
+                    if (idx > 0 && p - arr[idx - 1] > 1) acc.push('ellipsis')
+                    acc.push(p)
+                    return acc
+                  }, [])
+                  .map((p, idx) =>
+                    p === 'ellipsis' ? (
+                      <span key={`e-${idx}`} className="px-2 text-slate-400">
+                        …
+                      </span>
+                    ) : (
+                      <Button
+                        key={p}
+                        variant={p === pagination.currentPage ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => irParaPagina(p)}
+                        className={
+                          p === pagination.currentPage
+                            ? 'bg-[#BD8F29] hover:bg-[#BD8F29]/90 text-white min-w-9'
+                            : 'border-slate-200 min-w-9'
+                        }
+                      >
+                        {p}
+                      </Button>
+                    )
+                  )}
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => irParaPagina(pagination.currentPage + 1)}
+                  disabled={pagination.currentPage >= pagination.totalPages}
+                  className="border-slate-200"
+                >
+                  Próxima
+                  <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+          </>
         ) : (
           <Card className="border-0 shadow-xl shadow-slate-200/50 overflow-hidden">
             <CardContent className="p-16 text-center">

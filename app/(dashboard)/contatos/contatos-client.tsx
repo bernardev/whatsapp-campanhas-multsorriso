@@ -19,7 +19,9 @@ import {
   Shield,
   ShieldOff,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  X,
+  Loader2
 } from 'lucide-react'
 
 interface Contact {
@@ -51,6 +53,84 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [activeTab, setActiveTab] = useState<TabType>('all')
   const [unblockingId, setUnblockingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  // Edição de contato (modal)
+  const [editingContact, setEditingContact] = useState<Contact | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', phone: '', company: '' })
+  const [savingEdit, setSavingEdit] = useState<boolean>(false)
+  const [editError, setEditError] = useState<string | null>(null)
+
+  const openEdit = (contato: Contact): void => {
+    setEditError(null)
+    setEditingContact(contato)
+    setEditForm({
+      name: contato.name || '',
+      // phone vem normalizado (só dígitos). Reexibe no formato +55... esperado pela API.
+      phone: contato.phone.startsWith('+') ? contato.phone : `+${contato.phone}`,
+      company: contato.company || '',
+    })
+  }
+
+  const closeEdit = (): void => {
+    if (savingEdit) return
+    setEditingContact(null)
+    setEditError(null)
+  }
+
+  const handleSaveEdit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault()
+    if (!editingContact) return
+
+    setSavingEdit(true)
+    setEditError(null)
+
+    try {
+      const response = await fetch(`/api/contatos/${editingContact.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editForm),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Erro ao atualizar contato')
+      }
+
+      setEditingContact(null)
+      router.refresh()
+    } catch (error) {
+      setEditError(error instanceof Error ? error.message : 'Erro ao atualizar contato')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  const handleDelete = async (contato: Contact): Promise<void> => {
+    if (!confirm(`Tem certeza que deseja excluir o contato "${contato.name || contato.phone}"?\n\nEsta ação não pode ser desfeita.`)) {
+      return
+    }
+
+    try {
+      setDeletingId(contato.id)
+
+      const response = await fetch(`/api/contatos/${contato.id}`, {
+        method: 'DELETE',
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        throw new Error(data.error || 'Erro ao excluir contato')
+      }
+
+      router.refresh()
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Erro ao excluir contato')
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   const handleLogout = async (): Promise<void> => {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -396,19 +476,26 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
                             </Button>
                           ) : (
                             <>
-                              <Button 
-                                variant="ghost" 
+                              <Button
+                                variant="ghost"
                                 size="sm"
+                                onClick={() => openEdit(contato)}
                                 className="text-slate-600 hover:text-[#BD8F29]"
                               >
                                 <Edit className="w-4 h-4" />
                               </Button>
-                              <Button 
-                                variant="ghost" 
+                              <Button
+                                variant="ghost"
                                 size="sm"
+                                onClick={() => handleDelete(contato)}
+                                disabled={deletingId === contato.id}
                                 className="text-slate-600 hover:text-red-600"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                {deletingId === contato.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-4 h-4" />
+                                )}
                               </Button>
                             </>
                           )}
@@ -471,6 +558,109 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
             </Card>
         )}
       </div>
+
+      {/* Modal de Edição */}
+      {editingContact && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={closeEdit}
+          />
+          <Card className="relative w-full max-w-md border-0 shadow-2xl">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-gradient-to-br from-[#BD8F29]/20 to-[#BD8F29]/10">
+                    <Edit className="w-5 h-5 text-[#BD8F29]" />
+                  </div>
+                  <h2 className="text-xl font-bold text-[#1D2748]">Editar Contato</h2>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={closeEdit}
+                  className="text-slate-400 hover:text-slate-700"
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+
+              <form onSubmit={handleSaveEdit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Nome
+                  </label>
+                  <Input
+                    value={editForm.name}
+                    onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                    placeholder="Nome do contato"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Telefone
+                  </label>
+                  <Input
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
+                    placeholder="+5541999999999"
+                    required
+                  />
+                  <p className="text-xs text-slate-400 mt-1">
+                    Formato: +55 + DDD + número (ex: +5541999999999)
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                    Empresa <span className="text-slate-400">(opcional)</span>
+                  </label>
+                  <Input
+                    value={editForm.company}
+                    onChange={(e) => setEditForm({ ...editForm, company: e.target.value })}
+                    placeholder="Empresa"
+                  />
+                </div>
+
+                {editError && (
+                  <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-3">
+                    <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                    <span>{editError}</span>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={closeEdit}
+                    disabled={savingEdit}
+                    className="flex-1"
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={savingEdit}
+                    className="flex-1 bg-gradient-to-r from-[#BD8F29] to-[#BD8F29]/90 text-white"
+                  >
+                    {savingEdit ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      'Salvar'
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

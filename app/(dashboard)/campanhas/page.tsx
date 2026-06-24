@@ -4,13 +4,24 @@ import { getUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import DashboardClient from './dashboard-client'
 
-export default async function DashboardPage() {
+const PAGE_SIZE = 10
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ page?: string }>
+}) {
   // Verifica se está logado
   const user = await getUser()
-  
+
   if (!user) {
     redirect('/login')
   }
+
+  // Paginação: ?page=N (1-based). Sanitiza valores inválidos para 1.
+  const { page: pageParam } = await searchParams
+  const parsedPage = parseInt(pageParam || '1', 10)
+  const currentPage = Number.isNaN(parsedPage) || parsedPage < 1 ? 1 : parsedPage
 
   // Busca estatísticas reais
   const [
@@ -36,7 +47,12 @@ export default async function DashboardPage() {
     ? ((mensagensEnviadas / totalMensagens) * 100).toFixed(1)
     : '0.0'
 
-  // Busca campanhas do usuário
+  // Total de campanhas para calcular o número de páginas
+  const totalCampanhasUsuario = totalCampanhas
+  const totalPages = Math.max(1, Math.ceil(totalCampanhasUsuario / PAGE_SIZE))
+  const safePage = Math.min(currentPage, totalPages)
+
+  // Busca campanhas do usuário (página atual)
   const campanhas = await prisma.campaign.findMany({
     where: { userId: user.id },
     include: {
@@ -53,7 +69,8 @@ export default async function DashboardPage() {
       }
     },
     orderBy: { createdAt: 'desc' },
-    take: 10
+    skip: (safePage - 1) * PAGE_SIZE,
+    take: PAGE_SIZE
   })
 
   const stats = {
@@ -64,5 +81,19 @@ export default async function DashboardPage() {
     taxaEntrega: parseFloat(taxaEntrega)
   }
 
-  return <DashboardClient user={user} stats={stats} campanhas={campanhas} />
+  const pagination = {
+    currentPage: safePage,
+    totalPages,
+    totalItems: totalCampanhasUsuario,
+    pageSize: PAGE_SIZE,
+  }
+
+  return (
+    <DashboardClient
+      user={user}
+      stats={stats}
+      campanhas={campanhas}
+      pagination={pagination}
+    />
+  )
 }
