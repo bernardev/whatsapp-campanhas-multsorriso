@@ -4,6 +4,8 @@ import { redis } from '@/lib/redis'
 import { prisma } from '@/lib/prisma'
 import { sendTextMessage, sendTemplateMessage } from '@/lib/evolution'
 import { SendMessageJob } from '@/lib/queue'
+// Sobe junto o worker de lembretes (cron diário das 8h)
+import './reminder-worker'
 
 // Worker que processa as mensagens
 export const messageWorker = new Worker<SendMessageJob>(

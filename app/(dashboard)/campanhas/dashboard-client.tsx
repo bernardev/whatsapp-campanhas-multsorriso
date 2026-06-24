@@ -25,7 +25,8 @@ import {
   Smartphone,
   UserCog,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  CalendarClock
 } from 'lucide-react'
 import { MessageStatus as PrismaMessageStatus, CampaignStatus } from '@prisma/client'
 
@@ -289,6 +290,19 @@ useEffect(() => {
                   Contatos
                 </Button>
                 
+                <Button
+                  variant="ghost"
+                  onClick={() => router.push('/agenda')}
+                  className={`flex items-center gap-2 ${
+                    isActive('/agenda')
+                      ? 'bg-[#BD8F29]/10 text-[#BD8F29] font-semibold'
+                      : 'text-slate-600 hover:text-[#1D2748]'
+                  }`}
+                >
+                  <CalendarClock className="w-4 h-4" />
+                  Agenda
+                </Button>
+
                 <Button
                   variant="ghost"
                   onClick={() => router.push('/conversas')}

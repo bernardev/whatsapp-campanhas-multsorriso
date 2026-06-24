@@ -23,6 +23,7 @@ model User {
   campaigns Campaign[]
   leads     Lead[]
   conversationResponses ConversationResponse[]
+  appointments Appointment[]
 }
 
 enum UserRole {
@@ -74,10 +75,11 @@ model Contact {
   
   campaigns   CampaignContact[]
   messages    Message[]
-  
+  appointments Appointment[]
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
+
   @@index([phone])
   @@index([blacklisted])
 }
@@ -147,6 +149,7 @@ model WhatsAppInstance {
   provider      InstanceProvider @default(BAILEYS)
 
   messages      Message[]
+  appointments  Appointment[]
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -265,4 +268,45 @@ enum MessageStatus {
   DELIVERED
   READ
   FAILED
+}
+
+// ========== AGENDA / AVALIAÇÕES ==========
+model Appointment {
+  id           String   @id @default(cuid())
+
+  contactId    String
+  contact      Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  // Data + hora da avaliação (armazenado em UTC; UI usa fuso America/Sao_Paulo)
+  scheduledFor DateTime
+  professional String?              // vira o {{4}} do template confirmacao_consulta
+  notes        String?  @db.Text
+  status       AppointmentStatus @default(AGENDADO)
+
+  // Instância CLOUD_API usada para enviar os lembretes
+  instanceId   String?
+  instance     WhatsAppInstance? @relation(fields: [instanceId], references: [id])
+
+  // Idempotência dos lembretes automáticos (carimba quando cada um foi enviado)
+  lembreteVesperaEnviadoEm DateTime?  // template lembrete_24h (1 dia antes, 8h)
+  lembreteDiaEnviadoEm     DateTime?  // template confirmacao_consulta (no dia, 8h)
+
+  createdByUserId String?
+  createdBy       User?   @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([scheduledFor])
+  @@index([contactId])
+  @@index([status])
+  @@map("appointments")
+}
+
+enum AppointmentStatus {
+  AGENDADO
+  CONFIRMADO
+  CANCELADO
+  REALIZADO
+  FALTOU
 }
