@@ -125,18 +125,11 @@ async function enviarLembrete(
   return false
 }
 
-export async function runDailyReminders(now: Date = new Date()): Promise<ReminderResult> {
-  const hoje = spDayBoundsUtc(now)
+// VÉSPERA: envia o lembrete para as consultas de AMANHÃ ainda não avisadas.
+export async function runVespera(now: Date = new Date()): Promise<{ enviados: number; falhas: number }> {
   const amanha = spDayBoundsUtc(new Date(now.getTime() + 24 * 60 * 60 * 1000))
+  const res = { enviados: 0, falhas: 0 }
 
-  console.log(`[Lembretes] Rodando — hoje=${hoje.ymd}, amanhã=${amanha.ymd}`)
-
-  const result: ReminderResult = {
-    vespera: { enviados: 0, falhas: 0 },
-    dia: { enviados: 0, falhas: 0 },
-  }
-
-  // ===== VÉSPERA: consultas de AMANHÃ que ainda não receberam o lembrete =====
   const vespera = await prisma.appointment.findMany({
     where: {
       scheduledFor: { gte: amanha.start, lte: amanha.end },
@@ -147,11 +140,17 @@ export async function runDailyReminders(now: Date = new Date()): Promise<Reminde
   })
   for (const apt of vespera) {
     const ok = await enviarLembrete(apt, 'VESPERA')
-    if (ok) result.vespera.enviados++
-    else result.vespera.falhas++
+    if (ok) res.enviados++
+    else res.falhas++
   }
+  return res
+}
 
-  // ===== NO DIA: consultas de HOJE que ainda não receberam o lembrete =====
+// NO DIA: envia a confirmação para as consultas de HOJE ainda não avisadas.
+export async function runDia(now: Date = new Date()): Promise<{ enviados: number; falhas: number }> {
+  const hoje = spDayBoundsUtc(now)
+  const res = { enviados: 0, falhas: 0 }
+
   const dia = await prisma.appointment.findMany({
     where: {
       scheduledFor: { gte: hoje.start, lte: hoje.end },
@@ -162,12 +161,22 @@ export async function runDailyReminders(now: Date = new Date()): Promise<Reminde
   })
   for (const apt of dia) {
     const ok = await enviarLembrete(apt, 'DIA')
-    if (ok) result.dia.enviados++
-    else result.dia.falhas++
+    if (ok) res.enviados++
+    else res.falhas++
   }
+  return res
+}
+
+export async function runDailyReminders(now: Date = new Date()): Promise<ReminderResult> {
+  const hoje = spDayBoundsUtc(now)
+  const amanha = spDayBoundsUtc(new Date(now.getTime() + 24 * 60 * 60 * 1000))
+  console.log(`[Lembretes] Rodando — hoje=${hoje.ymd}, amanhã=${amanha.ymd}`)
+
+  const vespera = await runVespera(now)
+  const dia = await runDia(now)
 
   console.log(
-    `[Lembretes] Concluído — véspera: ${result.vespera.enviados} enviados / ${result.vespera.falhas} falhas; dia: ${result.dia.enviados} enviados / ${result.dia.falhas} falhas`
+    `[Lembretes] Concluído — véspera: ${vespera.enviados} enviados / ${vespera.falhas} falhas; dia: ${dia.enviados} enviados / ${dia.falhas} falhas`
   )
-  return result
+  return { vespera, dia }
 }
