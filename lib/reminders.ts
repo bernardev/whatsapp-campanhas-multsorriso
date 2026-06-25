@@ -2,6 +2,8 @@
 // Lógica dos lembretes automáticos de avaliação (disparada todo dia às 8h).
 // - VÉSPERA (consultas de amanhã): template lembrete_24h
 // - NO DIA (consultas de hoje):     template confirmacao_consulta
+// Cada tentativa (sucesso ou falha) é registrada em ReminderLog para monitoramento.
+import type { Appointment, Contact } from '@prisma/client'
 import { prisma } from './prisma'
 import { sendTemplateMessage } from './evolution'
 import {
@@ -15,6 +17,8 @@ import {
 
 // Só lembramos quem ainda está com a consulta de pé.
 const STATUS_ATIVOS = ['AGENDADO', 'CONFIRMADO'] as const
+
+type ReminderType = 'VESPERA' | 'DIA'
 
 interface ReminderResult {
   vespera: { enviados: number; falhas: number }
@@ -34,13 +38,98 @@ async function getCloudInstanceKey(fallbackId?: string | null): Promise<string |
   return inst?.instanceKey || null
 }
 
+// Extrai o wamid da resposta da Evolution (normaliza key.id ou messages[0].id).
+function extractWamid(data: unknown): string | undefined {
+  const d = (data || {}) as { key?: { id?: string }; messages?: Array<{ id?: string }> }
+  return d.key?.id || d.messages?.[0]?.id
+}
+
+// Envia UM lembrete e registra o resultado no log. Retorna true se enviou.
+async function enviarLembrete(
+  apt: Appointment & { contact: Contact },
+  type: ReminderType
+): Promise<boolean> {
+  const isVespera = type === 'VESPERA'
+  const tpl = isVespera ? TEMPLATE_VESPERA : TEMPLATE_DIA
+  const nome = apt.contact.name || 'paciente'
+
+  const params = isVespera
+    ? [nome, formatDataSP(apt.scheduledFor), formatHoraSP(apt.scheduledFor)]
+    : [
+        nome,
+        formatDataSP(apt.scheduledFor),
+        formatHoraSP(apt.scheduledFor),
+        apt.professional || PROFISSIONAL_PADRAO,
+      ]
+
+  const instanceKey = await getCloudInstanceKey(apt.instanceId)
+
+  if (!instanceKey) {
+    await prisma.reminderLog.create({
+      data: {
+        appointmentId: apt.id,
+        contactName: apt.contact.name,
+        contactPhone: apt.contact.phone,
+        type,
+        status: 'FAILED',
+        templateName: tpl.name,
+        error: 'Nenhuma instância CLOUD_API disponível',
+        scheduledFor: apt.scheduledFor,
+      },
+    })
+    console.warn(`[Lembretes] Sem instância CLOUD_API — ${type} não enviado para ${apt.contact.phone}`)
+    return false
+  }
+
+  const r = await sendTemplateMessage(instanceKey, apt.contact.phone, tpl.name, tpl.language, params)
+
+  if (r.success) {
+    const wamid = extractWamid(r.data)
+    await prisma.$transaction([
+      prisma.reminderLog.create({
+        data: {
+          appointmentId: apt.id,
+          contactName: apt.contact.name,
+          contactPhone: apt.contact.phone,
+          type,
+          status: 'SENT',
+          templateName: tpl.name,
+          providerMessageId: wamid || null,
+          scheduledFor: apt.scheduledFor,
+        },
+      }),
+      prisma.appointment.update({
+        where: { id: apt.id },
+        data: isVespera
+          ? { lembreteVesperaEnviadoEm: new Date() }
+          : { lembreteDiaEnviadoEm: new Date() },
+      }),
+    ])
+    console.log(`[Lembretes] ✅ ${type} enviado para ${nome} (${apt.contact.phone})`)
+    return true
+  }
+
+  await prisma.reminderLog.create({
+    data: {
+      appointmentId: apt.id,
+      contactName: apt.contact.name,
+      contactPhone: apt.contact.phone,
+      type,
+      status: 'FAILED',
+      templateName: tpl.name,
+      error: r.error || 'Erro desconhecido',
+      scheduledFor: apt.scheduledFor,
+    },
+  })
+  console.error(`[Lembretes] ❌ ${type} falhou para ${apt.contact.phone}: ${r.error}`)
+  return false
+}
+
 export async function runDailyReminders(now: Date = new Date()): Promise<ReminderResult> {
   const hoje = spDayBoundsUtc(now)
   const amanha = spDayBoundsUtc(new Date(now.getTime() + 24 * 60 * 60 * 1000))
 
-  console.log(
-    `[Lembretes] Rodando — hoje=${hoje.ymd}, amanhã=${amanha.ymd}`
-  )
+  console.log(`[Lembretes] Rodando — hoje=${hoje.ymd}, amanhã=${amanha.ymd}`)
 
   const result: ReminderResult = {
     vespera: { enviados: 0, falhas: 0 },
@@ -56,34 +145,10 @@ export async function runDailyReminders(now: Date = new Date()): Promise<Reminde
     },
     include: { contact: true },
   })
-
   for (const apt of vespera) {
-    const instanceKey = await getCloudInstanceKey(apt.instanceId)
-    if (!instanceKey) {
-      console.warn('[Lembretes] Nenhuma instância CLOUD_API disponível — pulando véspera')
-      result.vespera.falhas++
-      continue
-    }
-    const nome = apt.contact.name || 'paciente'
-    const params = [nome, formatDataSP(apt.scheduledFor), formatHoraSP(apt.scheduledFor)]
-    const r = await sendTemplateMessage(
-      instanceKey,
-      apt.contact.phone,
-      TEMPLATE_VESPERA.name,
-      TEMPLATE_VESPERA.language,
-      params
-    )
-    if (r.success) {
-      await prisma.appointment.update({
-        where: { id: apt.id },
-        data: { lembreteVesperaEnviadoEm: new Date() },
-      })
-      result.vespera.enviados++
-      console.log(`[Lembretes] ✅ Véspera enviado para ${nome} (${apt.contact.phone})`)
-    } else {
-      result.vespera.falhas++
-      console.error(`[Lembretes] ❌ Véspera falhou para ${apt.contact.phone}: ${r.error}`)
-    }
+    const ok = await enviarLembrete(apt, 'VESPERA')
+    if (ok) result.vespera.enviados++
+    else result.vespera.falhas++
   }
 
   // ===== NO DIA: consultas de HOJE que ainda não receberam o lembrete =====
@@ -95,39 +160,10 @@ export async function runDailyReminders(now: Date = new Date()): Promise<Reminde
     },
     include: { contact: true },
   })
-
   for (const apt of dia) {
-    const instanceKey = await getCloudInstanceKey(apt.instanceId)
-    if (!instanceKey) {
-      console.warn('[Lembretes] Nenhuma instância CLOUD_API disponível — pulando dia')
-      result.dia.falhas++
-      continue
-    }
-    const nome = apt.contact.name || 'paciente'
-    const params = [
-      nome,
-      formatDataSP(apt.scheduledFor),
-      formatHoraSP(apt.scheduledFor),
-      apt.professional || PROFISSIONAL_PADRAO,
-    ]
-    const r = await sendTemplateMessage(
-      instanceKey,
-      apt.contact.phone,
-      TEMPLATE_DIA.name,
-      TEMPLATE_DIA.language,
-      params
-    )
-    if (r.success) {
-      await prisma.appointment.update({
-        where: { id: apt.id },
-        data: { lembreteDiaEnviadoEm: new Date() },
-      })
-      result.dia.enviados++
-      console.log(`[Lembretes] ✅ Dia enviado para ${nome} (${apt.contact.phone})`)
-    } else {
-      result.dia.falhas++
-      console.error(`[Lembretes] ❌ Dia falhou para ${apt.contact.phone}: ${r.error}`)
-    }
+    const ok = await enviarLembrete(apt, 'DIA')
+    if (ok) result.dia.enviados++
+    else result.dia.falhas++
   }
 
   console.log(

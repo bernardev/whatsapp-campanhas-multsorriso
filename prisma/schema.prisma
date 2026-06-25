@@ -294,6 +294,8 @@ model Appointment {
   createdByUserId String?
   createdBy       User?   @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
 
+  reminderLogs ReminderLog[]
+
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -309,4 +311,41 @@ enum AppointmentStatus {
   CANCELADO
   REALIZADO
   FALTOU
+}
+
+// Registro de cada tentativa de envio de lembrete (sucesso ou falha),
+// para monitoramento na tela de Agenda.
+model ReminderLog {
+  id                String   @id @default(cuid())
+
+  appointmentId     String?
+  appointment       Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+
+  // Snapshot do destinatário (preservado mesmo se o agendamento for excluído)
+  contactName       String?
+  contactPhone      String
+
+  type              ReminderType    // VESPERA (consulta amanhã) | DIA (consulta hoje)
+  status            ReminderStatus  // SENT | FAILED
+  templateName      String
+  providerMessageId String?         // wamid da Meta (quando disponível)
+  error             String?  @db.Text
+  scheduledFor      DateTime         // data/hora da consulta (contexto)
+
+  createdAt         DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([appointmentId])
+  @@index([status])
+  @@map("reminder_logs")
+}
+
+enum ReminderType {
+  VESPERA
+  DIA
+}
+
+enum ReminderStatus {
+  SENT
+  FAILED
 }

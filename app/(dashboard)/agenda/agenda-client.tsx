@@ -20,6 +20,8 @@ import {
   Trash2,
   Bell,
   ArrowLeft,
+  ClipboardList,
+  AlertCircle,
 } from 'lucide-react'
 
 const TZ = 'America/Sao_Paulo'
@@ -41,6 +43,21 @@ interface Appointment {
   lembreteVesperaEnviadoEm: string | null
   lembreteDiaEnviadoEm: string | null
   contact: Contact
+}
+
+type ReminderType = 'VESPERA' | 'DIA'
+type ReminderStatus = 'SENT' | 'FAILED'
+
+interface ReminderLog {
+  id: string
+  contactName: string | null
+  contactPhone: string
+  type: ReminderType
+  status: ReminderStatus
+  templateName: string
+  error: string | null
+  scheduledFor: string
+  createdAt: string
 }
 
 interface AgendaClientProps {
@@ -71,6 +88,11 @@ function spTime(iso: string): string {
     timeZone: TZ, hour: '2-digit', minute: '2-digit',
   }).format(new Date(iso))
 }
+function spDate(iso: string): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: TZ, day: '2-digit', month: '2-digit', year: 'numeric',
+  }).format(new Date(iso))
+}
 
 export default function AgendaClient({ user, contatos }: AgendaClientProps) {
   const router = useRouter()
@@ -89,6 +111,34 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
 
   const [actingId, setActingId] = useState<string | null>(null)
   const [testando, setTestando] = useState(false)
+
+  // Monitoramento de lembretes enviados
+  const [showLogs, setShowLogs] = useState(false)
+  const [logs, setLogs] = useState<ReminderLog[]>([])
+  const [logStats, setLogStats] = useState({ totalSent: 0, totalFailed: 0 })
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logFiltro, setLogFiltro] = useState<'all' | 'SENT' | 'FAILED'>('all')
+
+  const carregarLogs = useCallback(async (filtro: 'all' | 'SENT' | 'FAILED') => {
+    setLogsLoading(true)
+    try {
+      const qs = filtro === 'all' ? '' : `?status=${filtro}`
+      const res = await fetch(`/api/agenda/lembretes${qs}`)
+      const data = await res.json()
+      setLogs(data.logs || [])
+      if (data.stats) setLogStats(data.stats)
+    } catch {
+      setLogs([])
+    } finally {
+      setLogsLoading(false)
+    }
+  }, [])
+
+  const abrirLogs = () => {
+    setShowLogs(true)
+    setLogFiltro('all')
+    carregarLogs('all')
+  }
 
   const hojeKey = spDateKey(now)
 
@@ -214,6 +264,7 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
         `Lembretes disparados!\n\nVéspera (amanhã): ${r.vespera.enviados} enviados, ${r.vespera.falhas} falhas\nNo dia (hoje): ${r.dia.enviados} enviados, ${r.dia.falhas} falhas`
       )
       await carregar()
+      if (showLogs) await carregarLogs(logFiltro)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Erro ao disparar lembretes')
     } finally {
@@ -266,6 +317,10 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
             <p className="text-slate-600 text-lg">Agendamentos de avaliação e lembretes automáticos</p>
           </div>
           <div className="flex gap-3">
+            <Button variant="outline" onClick={abrirLogs}
+              className="border-slate-200 text-slate-700 hover:bg-slate-50">
+              <ClipboardList className="w-4 h-4 mr-2" /> Lembretes enviados
+            </Button>
             {user.role === 'ADMIN' && (
               <Button variant="outline" onClick={testarLembretes} disabled={testando}
                 className="border-[#BD8F29] text-[#BD8F29] hover:bg-[#BD8F29]/10">
@@ -426,6 +481,91 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
           </Card>
         </div>
       </div>
+
+      {/* Modal de monitoramento de lembretes */}
+      {showLogs && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowLogs(false)} />
+          <Card className="relative w-full max-w-2xl border-0 shadow-2xl max-h-[85vh] flex flex-col">
+            <CardContent className="p-6 flex flex-col min-h-0">
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-xl bg-gradient-to-br from-[#BD8F29]/20 to-[#BD8F29]/10">
+                    <ClipboardList className="w-5 h-5 text-[#BD8F29]" />
+                  </div>
+                  <h2 className="text-xl font-bold text-[#1D2748]">Lembretes enviados</h2>
+                </div>
+                <Button variant="ghost" size="icon" onClick={() => setShowLogs(false)}
+                  className="text-slate-400 hover:text-slate-700">
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
+
+              {/* Stats + filtros */}
+              <div className="flex flex-wrap items-center gap-2 mb-4">
+                <button onClick={() => { setLogFiltro('all'); carregarLogs('all') }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    logFiltro === 'all' ? 'bg-[#1D2748] text-white border-[#1D2748]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                  Todos
+                </button>
+                <button onClick={() => { setLogFiltro('SENT'); carregarLogs('SENT') }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    logFiltro === 'SENT' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}>
+                  ✓ Enviados ({logStats.totalSent})
+                </button>
+                <button onClick={() => { setLogFiltro('FAILED'); carregarLogs('FAILED') }}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    logFiltro === 'FAILED' ? 'bg-red-600 text-white border-red-600' : 'border-red-200 text-red-700 hover:bg-red-50'}`}>
+                  ✕ Falhas ({logStats.totalFailed})
+                </button>
+              </div>
+
+              <div className="overflow-y-auto -mx-2 px-2 flex-1 min-h-0">
+                {logsLoading ? (
+                  <div className="py-12 text-center"><Loader2 className="w-6 h-6 animate-spin text-slate-300 mx-auto" /></div>
+                ) : logs.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <Bell className="w-12 h-12 text-slate-200 mx-auto mb-2" />
+                    <p className="text-sm text-slate-400">Nenhum lembrete registrado ainda.</p>
+                    <p className="text-xs text-slate-400 mt-1">Os envios automáticos das 8h aparecerão aqui.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {logs.map((log) => {
+                      const ok = log.status === 'SENT'
+                      return (
+                        <div key={log.id} className={`p-3 rounded-xl border ${ok ? 'border-slate-100 bg-white' : 'border-red-100 bg-red-50/40'}`}>
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex items-start gap-2 min-w-0">
+                              {ok ? <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
+                                  : <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />}
+                              <div className="min-w-0">
+                                <p className="font-semibold text-sm text-[#1D2748] truncate">
+                                  {log.contactName || 'Sem nome'} <span className="font-normal text-slate-400">· {log.contactPhone}</span>
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  {log.type === 'VESPERA' ? '🔔 Lembrete (véspera)' : '✅ Confirmação (no dia)'}
+                                  {' · consulta '}{spDate(log.scheduledFor)} {spTime(log.scheduledFor)}
+                                </p>
+                                {!ok && log.error && (
+                                  <p className="text-xs text-red-600 mt-1 break-words">Erro: {log.error}</p>
+                                )}
+                              </div>
+                            </div>
+                            <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0">
+                              {new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(log.createdAt))}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Modal de agendamento */}
       {showForm && (
