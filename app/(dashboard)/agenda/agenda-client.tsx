@@ -94,6 +94,21 @@ function spDate(iso: string): string {
   }).format(new Date(iso))
 }
 
+// Agrupa os logs por dia da consulta (chave SP), preservando a ordem recebida da API.
+function agruparPorDia(logs: ReminderLog[]): { dia: string; itens: ReminderLog[] }[] {
+  const grupos: { dia: string; itens: ReminderLog[] }[] = []
+  const indice: Record<string, number> = {}
+  for (const log of logs) {
+    const dia = spDateKey(new Date(log.scheduledFor))
+    if (indice[dia] === undefined) {
+      indice[dia] = grupos.length
+      grupos.push({ dia, itens: [] })
+    }
+    grupos[indice[dia]].itens.push(log)
+  }
+  return grupos
+}
+
 export default function AgendaClient({ user, contatos }: AgendaClientProps) {
   const router = useRouter()
   const now = new Date()
@@ -118,12 +133,16 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
   const [logStats, setLogStats] = useState({ totalSent: 0, totalFailed: 0 })
   const [logsLoading, setLogsLoading] = useState(false)
   const [logFiltro, setLogFiltro] = useState<'all' | 'SENT' | 'FAILED'>('all')
+  const [logDate, setLogDate] = useState<string>('') // YYYY-MM-DD (data da consulta)
 
-  const carregarLogs = useCallback(async (filtro: 'all' | 'SENT' | 'FAILED') => {
+  const carregarLogs = useCallback(async (filtro: 'all' | 'SENT' | 'FAILED', date: string) => {
     setLogsLoading(true)
     try {
-      const qs = filtro === 'all' ? '' : `?status=${filtro}`
-      const res = await fetch(`/api/agenda/lembretes${qs}`)
+      const params = new URLSearchParams()
+      if (filtro !== 'all') params.set('status', filtro)
+      if (date) params.set('date', date)
+      const qs = params.toString()
+      const res = await fetch(`/api/agenda/lembretes${qs ? `?${qs}` : ''}`)
       const data = await res.json()
       setLogs(data.logs || [])
       if (data.stats) setLogStats(data.stats)
@@ -137,7 +156,8 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
   const abrirLogs = () => {
     setShowLogs(true)
     setLogFiltro('all')
-    carregarLogs('all')
+    setLogDate('')
+    carregarLogs('all', '')
   }
 
   const hojeKey = spDateKey(now)
@@ -264,7 +284,7 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
         `Lembretes disparados!\n\nVéspera (amanhã): ${r.vespera.enviados} enviados, ${r.vespera.falhas} falhas\nNo dia (hoje): ${r.dia.enviados} enviados, ${r.dia.falhas} falhas`
       )
       await carregar()
-      if (showLogs) await carregarLogs(logFiltro)
+      if (showLogs) await carregarLogs(logFiltro, logDate)
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Erro ao disparar lembretes')
     } finally {
@@ -501,23 +521,40 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
                 </Button>
               </div>
 
-              {/* Stats + filtros */}
-              <div className="flex flex-wrap items-center gap-2 mb-4">
-                <button onClick={() => { setLogFiltro('all'); carregarLogs('all') }}
+              {/* Stats + filtros de status */}
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <button onClick={() => { setLogFiltro('all'); carregarLogs('all', logDate) }}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                     logFiltro === 'all' ? 'bg-[#1D2748] text-white border-[#1D2748]' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                   Todos
                 </button>
-                <button onClick={() => { setLogFiltro('SENT'); carregarLogs('SENT') }}
+                <button onClick={() => { setLogFiltro('SENT'); carregarLogs('SENT', logDate) }}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                     logFiltro === 'SENT' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}>
                   ✓ Enviados ({logStats.totalSent})
                 </button>
-                <button onClick={() => { setLogFiltro('FAILED'); carregarLogs('FAILED') }}
+                <button onClick={() => { setLogFiltro('FAILED'); carregarLogs('FAILED', logDate) }}
                   className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                     logFiltro === 'FAILED' ? 'bg-red-600 text-white border-red-600' : 'border-red-200 text-red-700 hover:bg-red-50'}`}>
                   ✕ Falhas ({logStats.totalFailed})
                 </button>
+              </div>
+
+              {/* Filtro por data da consulta */}
+              <div className="flex flex-wrap items-center gap-2 mb-4 pb-4 border-b border-slate-100">
+                <label className="text-xs font-medium text-slate-500">Data da consulta:</label>
+                <Input
+                  type="date"
+                  value={logDate}
+                  onChange={(e) => { setLogDate(e.target.value); carregarLogs(logFiltro, e.target.value) }}
+                  className="h-8 w-auto text-sm"
+                />
+                {logDate && (
+                  <Button variant="ghost" size="sm" onClick={() => { setLogDate(''); carregarLogs(logFiltro, '') }}
+                    className="h-8 text-xs text-slate-500 hover:text-slate-700">
+                    <X className="w-3 h-3 mr-1" /> Limpar
+                  </Button>
+                )}
               </div>
 
               <div className="overflow-y-auto -mx-2 px-2 flex-1 min-h-0">
@@ -530,35 +567,47 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
                     <p className="text-xs text-slate-400 mt-1">Os envios automáticos das 8h aparecerão aqui.</p>
                   </div>
                 ) : (
-                  <div className="space-y-2">
-                    {logs.map((log) => {
-                      const ok = log.status === 'SENT'
-                      return (
-                        <div key={log.id} className={`p-3 rounded-xl border ${ok ? 'border-slate-100 bg-white' : 'border-red-100 bg-red-50/40'}`}>
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="flex items-start gap-2 min-w-0">
-                              {ok ? <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
-                                  : <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />}
-                              <div className="min-w-0">
-                                <p className="font-semibold text-sm text-[#1D2748] truncate">
-                                  {log.contactName || 'Sem nome'} <span className="font-normal text-slate-400">· {log.contactPhone}</span>
-                                </p>
-                                <p className="text-xs text-slate-500">
-                                  {log.type === 'VESPERA' ? '🔔 Lembrete (véspera)' : '✅ Confirmação (no dia)'}
-                                  {' · consulta '}{spDate(log.scheduledFor)} {spTime(log.scheduledFor)}
-                                </p>
-                                {!ok && log.error && (
-                                  <p className="text-xs text-red-600 mt-1 break-words">Erro: {log.error}</p>
-                                )}
-                              </div>
-                            </div>
-                            <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0">
-                              {new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(log.createdAt))}
-                            </span>
-                          </div>
+                  <div className="space-y-5">
+                    {agruparPorDia(logs).map(({ dia, itens }) => (
+                      <div key={dia}>
+                        {/* Cabeçalho do dia da consulta */}
+                        <div className="flex items-center gap-2 mb-2 sticky top-0 bg-white/95 backdrop-blur-sm py-1">
+                          <CalendarIcon className="w-4 h-4 text-[#BD8F29]" />
+                          <h4 className="text-sm font-bold text-[#1D2748]">Consultas de {spDate(itens[0].scheduledFor)}</h4>
+                          <span className="text-xs text-slate-400">({itens.length})</span>
                         </div>
-                      )
-                    })}
+                        <div className="space-y-2">
+                          {itens.map((log) => {
+                            const ok = log.status === 'SENT'
+                            return (
+                              <div key={log.id} className={`p-3 rounded-xl border ${ok ? 'border-slate-100 bg-white' : 'border-red-100 bg-red-50/40'}`}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="flex items-start gap-2 min-w-0">
+                                    {ok ? <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
+                                        : <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />}
+                                    <div className="min-w-0">
+                                      <p className="font-semibold text-sm text-[#1D2748] truncate">
+                                        {log.contactName || 'Sem nome'} <span className="font-normal text-slate-400">· {log.contactPhone}</span>
+                                      </p>
+                                      <p className="text-xs text-slate-500">
+                                        {log.type === 'VESPERA' ? '🔔 Lembrete (véspera)' : '✅ Confirmação (no dia)'}
+                                        {' · '}{spTime(log.scheduledFor)}
+                                      </p>
+                                      {!ok && log.error && (
+                                        <p className="text-xs text-red-600 mt-1 break-words">Erro: {log.error}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <span className="text-[10px] text-slate-400 whitespace-nowrap flex-shrink-0 text-right">
+                                    enviado<br />{new Intl.DateTimeFormat('pt-BR', { timeZone: TZ, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(log.createdAt))}
+                                  </span>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>

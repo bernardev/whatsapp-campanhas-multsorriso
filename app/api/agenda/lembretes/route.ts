@@ -6,6 +6,7 @@ import { requireAdmin } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { jwtVerify } from 'jose'
 import { runDailyReminders } from '@/lib/reminders'
+import { spDayBoundsUtc } from '@/lib/agenda'
 
 const SECRET = new TextEncoder().encode(
   process.env.NEXTAUTH_SECRET || 'seu-secret-super-seguro'
@@ -31,11 +32,26 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status') // SENT | FAILED
-    const limit = Math.min(parseInt(searchParams.get('limit') || '100', 10), 300)
+    const date = searchParams.get('date') // YYYY-MM-DD → filtra pela DATA DA CONSULTA (fuso SP)
+    const limit = Math.min(parseInt(searchParams.get('limit') || '200', 10), 500)
+
+    const where: {
+      status?: 'SENT' | 'FAILED'
+      scheduledFor?: { gte: Date; lte: Date }
+    } = {}
+
+    if (status === 'SENT' || status === 'FAILED') where.status = status
+
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      // Usa o meio-dia para evitar qualquer ambiguidade de borda do dia
+      const { start, end } = spDayBoundsUtc(new Date(`${date}T12:00:00-03:00`))
+      where.scheduledFor = { gte: start, lte: end }
+    }
 
     const logs = await prisma.reminderLog.findMany({
-      where: status === 'SENT' || status === 'FAILED' ? { status } : {},
-      orderBy: { createdAt: 'desc' },
+      where,
+      // Ordena pela consulta (mais recente primeiro) e depois pelo horário do envio
+      orderBy: [{ scheduledFor: 'desc' }, { createdAt: 'desc' }],
       take: limit,
     })
 
