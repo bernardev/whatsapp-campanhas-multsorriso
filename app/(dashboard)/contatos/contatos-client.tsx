@@ -18,6 +18,7 @@ import {
   Building2,
   Shield,
   ShieldOff,
+  Ban,
   Clock,
   AlertTriangle,
   X,
@@ -53,6 +54,7 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [activeTab, setActiveTab] = useState<TabType>('all')
   const [unblockingId, setUnblockingId] = useState<string | null>(null)
+  const [blockingId, setBlockingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   // Edição de contato (modal)
@@ -167,6 +169,28 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
       alert('Erro ao desbloquear contato')
     } finally {
       setUnblockingId(null)
+    }
+  }
+
+  const handleBlock = async (contact: Contact): Promise<void> => {
+    const label = contact.name || contact.phone
+    if (!confirm(`Bloquear "${label}"? Ele deixará de receber campanhas.`)) return
+
+    try {
+      setBlockingId(contact.id)
+
+      const response = await fetch(`/api/contatos/${contact.id}/bloquear`, {
+        method: 'POST'
+      })
+
+      if (!response.ok) throw new Error('Erro ao bloquear')
+
+      router.refresh()
+    } catch (error) {
+      console.error('Erro ao bloquear:', error)
+      alert('Erro ao bloquear contato')
+    } finally {
+      setBlockingId(null)
     }
   }
 
@@ -483,6 +507,20 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
                                 className="text-slate-600 hover:text-[#BD8F29]"
                               >
                                 <Edit className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleBlock(contato)}
+                                disabled={blockingId === contato.id}
+                                className="text-slate-600 hover:text-red-600"
+                                title="Bloquear (adicionar à blacklist)"
+                              >
+                                {blockingId === contato.id ? (
+                                  <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                  <Ban className="w-4 h-4" />
+                                )}
                               </Button>
                               <Button
                                 variant="ghost"
