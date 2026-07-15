@@ -21,7 +21,12 @@ export async function GET(
     const decodedJid = decodeURIComponent(remoteJid)
 
     const { searchParams } = new URL(request.url)
-    const page = parseInt(searchParams.get('page') ?? '1', 10)
+    // Sem `page` na querystring → devolve o histórico COMPLETO da conversa
+    // (atendimento precisa ver mensagens antigas). Com `page`, mantém a
+    // paginação de 50 em 50 para quem quiser consumir aos poucos.
+    const pageParam = searchParams.get('page')
+    const paginate = pageParam !== null
+    const page = paginate ? Math.max(1, parseInt(pageParam, 10) || 1) : 1
     const limit = 50
     const skip = (page - 1) * limit
 
@@ -30,8 +35,7 @@ export async function GET(
       prisma.conversationMessage.findMany({
         where: { remoteJid: decodedJid },
         orderBy: { timestamp: 'desc' },
-        take: limit,
-        skip,
+        ...(paginate ? { take: limit, skip } : {}),
       }),
       prisma.conversationMessage.count({
         where: { remoteJid: decodedJid },
@@ -53,9 +57,9 @@ export async function GET(
       mensagens,
       pagination: {
         page,
-        pages: Math.ceil(total / limit),
+        pages: paginate ? Math.ceil(total / limit) : 1,
         total,
-        limit,
+        limit: paginate ? limit : total,
       }
     })
 
