@@ -46,6 +46,7 @@ interface Conversa {
   lastMessageFromMe: boolean
   needsResponse: boolean
   lastCampaign?: string | null
+  lastCampaignBy?: string | null
   messages: Message[]
 }
 
@@ -600,10 +601,13 @@ export default function ConversasPage() {
                       {conversa.lastCampaign && (
                         <span
                           className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[#BD8F29]/10 text-[#BD8F29]"
-                          title={`Última campanha enviada: ${conversa.lastCampaign}`}
+                          title={`Última campanha: ${conversa.lastCampaign}${conversa.lastCampaignBy ? ' — enviada por ' + conversa.lastCampaignBy : ''}`}
                         >
                           <Megaphone className="w-3 h-3" />
                           {conversa.lastCampaign.replace(/_/g, ' ')}
+                          {conversa.lastCampaignBy && (
+                            <span className="opacity-70">· {conversa.lastCampaignBy}</span>
+                          )}
                         </span>
                       )}
                       {conversa.needsResponse && (

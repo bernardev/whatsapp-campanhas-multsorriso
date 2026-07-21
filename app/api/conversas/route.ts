@@ -14,6 +14,7 @@ interface Conversa {
   lastMessageFromMe: boolean
   needsResponse: boolean
   lastCampaign: string | null // etiqueta: última campanha enviada a este número
+  lastCampaignBy: string | null // usuário que disparou essa campanha
   messages: never[] // carregadas sob demanda em /api/conversas/[remoteJid]/mensagens
 }
 
@@ -27,6 +28,7 @@ interface TplRow {
   remoteJid: string
   messageText: string
   timestamp: Date
+  sender: string | null // nome do usuário que criou/disparou a campanha
 }
 interface NameRow {
   remoteJid: string
@@ -50,14 +52,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ORDER BY "remoteJid", "timestamp" DESC
     `
 
-    // Última mensagem de CAMPANHA (template) enviada, por variante de número.
+    // Última mensagem de CAMPANHA (template) enviada, por variante de número,
+    // já resolvendo QUEM disparou: ConversationMessage.messageId (wamid) casa com
+    // Message.providerMessageId → Campaign → User.
     const tplRows = await prisma.$queryRaw<TplRow[]>`
-      SELECT DISTINCT ON ("remoteJid")
-        "remoteJid", "messageText", "timestamp"
-      FROM "conversation_messages"
-      WHERE "fromMe" = true
-        AND ("messageText" LIKE '[template:%' OR "messageText" LIKE '▶%')
-      ORDER BY "remoteJid", "timestamp" DESC
+      SELECT DISTINCT ON (cm."remoteJid")
+        cm."remoteJid", cm."messageText", cm."timestamp", u."name" AS sender
+      FROM "conversation_messages" cm
+      LEFT JOIN "Message" m ON m."providerMessageId" = cm."messageId"
+      LEFT JOIN "Campaign" c ON c."id" = m."campaignId"
+      LEFT JOIN "User" u ON u."id" = c."userId"
+      WHERE cm."fromMe" = true
+        AND (cm."messageText" LIKE '[template:%' OR cm."messageText" LIKE '▶%')
+      ORDER BY cm."remoteJid", cm."timestamp" DESC
     `
 
     // pushName da mensagem RECEBIDA mais recente, por variante de número.
@@ -95,14 +102,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    // Etiqueta: última campanha por número canônico
-    const campMap = new Map<string, { name: string; at: Date }>()
+    // Etiqueta: última campanha (e quem disparou) por número canônico
+    const campMap = new Map<string, { name: string; sender: string | null; at: Date }>()
     for (const row of tplRows) {
       const name = parseCampaign(row.messageText)
       if (!name) continue
       const k = canonicalKey(row.remoteJid)
       const cur = campMap.get(k)
-      if (!cur || row.timestamp > cur.at) campMap.set(k, { name, at: row.timestamp })
+      if (!cur || row.timestamp > cur.at) campMap.set(k, { name, sender: row.sender, at: row.timestamp })
     }
 
     // Nome do WhatsApp por número canônico (o mais recente entre as variantes)
@@ -142,6 +149,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         lastMessageFromMe: grp.lastMessageFromMe,
         needsResponse: resolveNeeds(grp),
         lastCampaign: campMap.get(k)?.name ?? null,
+        lastCampaignBy: campMap.get(k)?.sender ?? null,
         messages: [],
       })
     }
