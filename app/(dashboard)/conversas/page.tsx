@@ -17,6 +17,8 @@ import {
   Plus,
   Loader2,
   Building2,
+  Megaphone,
+  Trash2,
 } from 'lucide-react'
 
 interface Message {
@@ -43,6 +45,7 @@ interface Conversa {
   lastMessageAt: Date
   lastMessageFromMe: boolean
   needsResponse: boolean
+  lastCampaign?: string | null
   messages: Message[]
 }
 
@@ -141,6 +144,7 @@ export default function ConversasPage() {
   const [selectedConversa, setSelectedConversa] = useState<Conversa | null>(null)
   const [filterType, setFilterType] = useState<FilterType>('all')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [deletingConversa, setDeletingConversa] = useState(false)
   const [messageInput, setMessageInput] = useState('')
   const [sendingMessage, setSendingMessage] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -311,6 +315,35 @@ export default function ConversasPage() {
       alert('Erro ao atualizar status da conversa')
     } finally {
       setActionLoading(null)
+    }
+  }
+
+  async function handleDeleteConversa(conversa: Conversa) {
+    const nome = conversa.displayName || conversa.displayPhone
+    if (!confirm(
+      `Excluir a conversa com "${nome}"?\n\nIsso remove o histórico apenas do painel — não apaga nada no WhatsApp do paciente. Não dá para desfazer.`
+    )) return
+
+    try {
+      setDeletingConversa(true)
+      const response = await fetch(
+        `/api/conversas/${encodeURIComponent(conversa.remoteJid)}`,
+        { method: 'DELETE' }
+      )
+      if (!response.ok) throw new Error('Erro ao excluir')
+
+      // Sai da conversa e remove da lista
+      setSelectedConversa(null)
+      selectedConversaRef.current = null
+      setMessages([])
+      messagesRef.current = []
+      setConversas(prev => prev.filter(c => c.remoteJid !== conversa.remoteJid))
+      await loadConversas(true)
+    } catch (error) {
+      console.error('Erro ao excluir conversa:', error)
+      alert('Erro ao excluir conversa. Tente novamente.')
+    } finally {
+      setDeletingConversa(false)
     }
   }
 
@@ -563,14 +596,23 @@ export default function ConversasPage() {
                       {conversa.lastMessage}
                     </p>
 
-                    {conversa.needsResponse && (
-                      <div className="mt-2">
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      {conversa.lastCampaign && (
+                        <span
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[#BD8F29]/10 text-[#BD8F29]"
+                          title={`Última campanha enviada: ${conversa.lastCampaign}`}
+                        >
+                          <Megaphone className="w-3 h-3" />
+                          {conversa.lastCampaign.replace(/_/g, ' ')}
+                        </span>
+                      )}
+                      {conversa.needsResponse && (
                         <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700">
                           <Clock className="w-3 h-3" />
                           Aguardando resposta
                         </span>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -617,30 +659,47 @@ export default function ConversasPage() {
                   </div>
                 </div>
 
-                <Button
-                  size="sm"
-                  variant={selectedConversa.needsResponse ? 'default' : 'outline'}
-                  onClick={() => toggleResponseStatus(selectedConversa.remoteJid, selectedConversa.needsResponse)}
-                  disabled={actionLoading === selectedConversa.remoteJid}
-                  className={selectedConversa.needsResponse
-                    ? 'bg-emerald-600 hover:bg-emerald-700'
-                    : 'border-slate-300'
-                  }
-                >
-                  {actionLoading === selectedConversa.remoteJid ? (
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : selectedConversa.needsResponse ? (
-                    <>
-                      <CheckCircle2 className="w-4 h-4 mr-1.5" />
-                      Marcar como respondido
-                    </>
-                  ) : (
-                    <>
-                      <X className="w-4 h-4 mr-1.5" />
-                      Marcar como não respondido
-                    </>
-                  )}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant={selectedConversa.needsResponse ? 'default' : 'outline'}
+                    onClick={() => toggleResponseStatus(selectedConversa.remoteJid, selectedConversa.needsResponse)}
+                    disabled={actionLoading === selectedConversa.remoteJid}
+                    className={selectedConversa.needsResponse
+                      ? 'bg-emerald-600 hover:bg-emerald-700'
+                      : 'border-slate-300'
+                    }
+                  >
+                    {actionLoading === selectedConversa.remoteJid ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : selectedConversa.needsResponse ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 mr-1.5" />
+                        Marcar como respondido
+                      </>
+                    ) : (
+                      <>
+                        <X className="w-4 h-4 mr-1.5" />
+                        Marcar como não respondido
+                      </>
+                    )}
+                  </Button>
+
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleDeleteConversa(selectedConversa)}
+                    disabled={deletingConversa}
+                    className="border-red-300 text-red-600 hover:bg-red-600 hover:text-white"
+                    title="Excluir conversa do painel"
+                  >
+                    {deletingConversa ? (
+                      <div className="w-4 h-4 border-2 border-red-600 border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Trash2 className="w-4 h-4" />
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
 

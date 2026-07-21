@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getUser } from '@/lib/auth'
+import { remoteJidVariants } from '@/lib/phone'
 
 interface RouteContext {
   params: Promise<{ remoteJid: string }>
@@ -19,6 +20,9 @@ export async function GET(
 
     const { remoteJid } = await context.params
     const decodedJid = decodeURIComponent(remoteJid)
+    // Junta todas as variantes de formato do número (com/sem "+", com/sem o 9º
+    // dígito) para trazer o histórico completo da mesma pessoa.
+    const variants = remoteJidVariants(decodedJid)
 
     const { searchParams } = new URL(request.url)
     // Sem `page` na querystring → devolve o histórico COMPLETO da conversa
@@ -33,12 +37,12 @@ export async function GET(
     // Busca do banco local — filtra pelo remoteJid exato
     const [mensagensRaw, total] = await Promise.all([
       prisma.conversationMessage.findMany({
-        where: { remoteJid: decodedJid },
+        where: { remoteJid: { in: variants } },
         orderBy: { timestamp: 'desc' },
         ...(paginate ? { take: limit, skip } : {}),
       }),
       prisma.conversationMessage.count({
-        where: { remoteJid: decodedJid },
+        where: { remoteJid: { in: variants } },
       }),
     ])
 
