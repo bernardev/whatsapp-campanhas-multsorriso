@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { Redis } from 'ioredis'
 import { EVENTS_CHANNEL } from '@/lib/redis-pubsub'
+import { redisTlsOptions } from '@/lib/redis-tls'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -13,7 +14,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       // Cria cliente subscriber dedicado para esta conexão
       const subscriber = new Redis(process.env.REDIS_URL!, {
         maxRetriesPerRequest: null,
-        tls: { rejectUnauthorized: false }
+        ...redisTlsOptions(),
       })
 
       // Envia ping a cada 30s para manter conexão viva
