@@ -32,6 +32,10 @@ export const reminderWorker = new Worker(
   {
     connection: redis,
     concurrency: 1,
+    // Esta fila dispara 1x por dia (08:00). Não faz sentido consultar o Redis
+    // a cada poucos milissegundos — o job agendado acorda o worker sozinho.
+    drainDelay: 300,
+    stalledInterval: 300000,
   }
 )
 

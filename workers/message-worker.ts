@@ -153,7 +153,13 @@ export const messageWorker = new Worker<SendMessageJob>(
     limiter: {
       max: parseInt(process.env.MESSAGES_PER_MINUTE || '20'), // 20 msgs/min
       duration: 60000 // 1 minuto
-    }
+    },
+    // Fila ociosa custa dinheiro no Upstash (cobrança por comando). Com o
+    // long-poll padrão (5s) o worker martelava o Redis sem parar. Jobs novos
+    // acordam o worker na hora pelo "marker" do BullMQ, então esperar mais
+    // tempo aqui NÃO atrasa o disparo — só corta consulta à toa.
+    drainDelay: 30,
+    stalledInterval: 60000,
   }
 )
 
