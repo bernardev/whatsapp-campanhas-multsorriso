@@ -4,6 +4,7 @@ import { redis } from '@/lib/redis'
 import { prisma } from '@/lib/prisma'
 import { sendTextMessage, sendTemplateMessage } from '@/lib/evolution'
 import { SendMessageJob } from '@/lib/queue'
+import { finalizeCampaignIfDone } from '@/lib/campaign-status'
 // Sobe junto o worker de lembretes (cron diário das 8h)
 import './reminder-worker'
 
@@ -164,12 +165,14 @@ export const messageWorker = new Worker<SendMessageJob>(
 )
 
 // Event listeners
-messageWorker.on('completed', (job) => {
+messageWorker.on('completed', async (job) => {
   console.log(`[Worker] Job ${job.id} completado`)
+  await finalizeCampaignIfDone(job.data?.campaignId)
 })
 
-messageWorker.on('failed', (job, err) => {
+messageWorker.on('failed', async (job, err) => {
   console.error(`[Worker] Job ${job?.id} falhou:`, err.message)
+  await finalizeCampaignIfDone(job?.data?.campaignId)
 })
 
 messageWorker.on('error', (err) => {
