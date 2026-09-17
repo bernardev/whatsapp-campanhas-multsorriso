@@ -3,9 +3,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { jwtVerify } from 'jose'
 import { z } from 'zod'
+import { requireEnv } from '@/lib/env'
 
 const SECRET = new TextEncoder().encode(
-  process.env.NEXTAUTH_SECRET || 'seu-secret-super-seguro'
+  requireEnv('NEXTAUTH_SECRET')
 )
 
 async function getUserFromToken(request: NextRequest) {

@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { requireEnv } from '@/lib/env'
 
 interface MetaTemplateParam {
   type: string
@@ -28,8 +29,8 @@ interface MetaTemplate {
   components: MetaComponent[]
 }
 
-const EVOLUTION_URL = process.env.EVOLUTION_API_URL || 'http://31.97.42.88:8082'
-const EVOLUTION_KEY = process.env.EVOLUTION_API_KEY || 'apikey321'
+const EVOLUTION_URL = requireEnv('EVOLUTION_API_URL')
+const EVOLUTION_KEY = requireEnv('EVOLUTION_API_KEY')
 
 function countBodyParams(tpl: MetaTemplate): number {
   const body = tpl.components.find((c) => c.type === 'BODY')

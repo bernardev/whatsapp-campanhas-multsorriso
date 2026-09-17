@@ -7,9 +7,10 @@ import { prisma } from '@/lib/prisma'
 import { jwtVerify } from 'jose'
 import { runDailyReminders } from '@/lib/reminders'
 import { spDayBoundsUtc } from '@/lib/agenda'
+import { requireEnv } from '@/lib/env'
 
 const SECRET = new TextEncoder().encode(
-  process.env.NEXTAUTH_SECRET || 'seu-secret-super-seguro'
+  requireEnv('NEXTAUTH_SECRET')
 )
 
 async function isAuthenticated(request: NextRequest): Promise<boolean> {

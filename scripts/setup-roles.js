@@ -23,7 +23,10 @@ async function main() {
 
   // 2. Cria usuário de teste com role USER
   const testEmail = 'teste@multsorriso.com'
-  const testPassword = 'teste123'
+  // SEGURANCA: sem senha fixa (repo publico). Use TEST_PASSWORD ou gera aleatoria.
+  const testPassword =
+    process.env.TEST_PASSWORD ||
+    require('crypto').randomBytes(12).toString('base64url')
 
   const existingTest = await prisma.user.findUnique({
     where: { email: testEmail }

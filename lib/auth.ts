@@ -1,9 +1,10 @@
 // lib/auth.ts
 import { jwtVerify } from 'jose'
 import { cookies } from 'next/headers'
+import { requireEnv } from '@/lib/env'
 
 const SECRET = new TextEncoder().encode(
-  process.env.NEXTAUTH_SECRET || 'seu-secret-super-seguro'
+  requireEnv('NEXTAUTH_SECRET')
 )
 
 type UserRole = 'ADMIN' | 'USER'

@@ -4,9 +4,10 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getUser, requireAdmin } from '@/lib/auth'
 import axios from 'axios'
+import { requireEnv } from '@/lib/env'
 
-const EVOLUTION_URL = process.env.EVOLUTION_API_URL || 'http://31.97.42.88:8082'
-const EVOLUTION_KEY = process.env.EVOLUTION_API_KEY || 'apikey321'
+const EVOLUTION_URL = requireEnv('EVOLUTION_API_URL')
+const EVOLUTION_KEY = requireEnv('EVOLUTION_API_KEY')
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {

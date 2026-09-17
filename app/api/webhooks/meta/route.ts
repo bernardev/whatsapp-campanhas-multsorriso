@@ -23,8 +23,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { cloudinary } from '@/lib/cloudinary'
 import { MessageStatus } from '@prisma/client'
+import { requireEnv } from '@/lib/env'
 
-const VERIFY_TOKEN = process.env.META_VERIFY_TOKEN || 'mult_sorriso_verify'
+// Lido sob demanda (nao no carregamento do modulo) pra nao travar o build
+// quando a variavel so existe no ambiente de execucao.
+const getVerifyToken = () => requireEnv('META_VERIFY_TOKEN')
 const META_TOKEN = process.env.META_ACCESS_TOKEN
 const GRAPH_URL = `https://graph.facebook.com/${process.env.META_GRAPH_VERSION || 'v21.0'}`
 
@@ -34,7 +37,7 @@ export async function GET(request: NextRequest) {
   const token = searchParams.get('hub.verify_token')
   const challenge = searchParams.get('hub.challenge')
 
-  if (mode === 'subscribe' && token === VERIFY_TOKEN && challenge) {
+  if (mode === 'subscribe' && token === getVerifyToken() && challenge) {
     return new NextResponse(challenge, { status: 200 })
   }
   return new NextResponse('Forbidden', { status: 403 })

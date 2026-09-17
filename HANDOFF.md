@@ -67,7 +67,7 @@ DATABASE_URL            # Postgres (Neon)
 REDIS_URL               # Redis
 NEXTAUTH_URL
 NEXTAUTH_SECRET         # segredo do JWT (lib/auth.ts e rotas)
-EVOLUTION_API_URL       # Evolution API (ex.: http://31.97.42.88:8082)
+EVOLUTION_API_URL       # Evolution API (ex.: http://<IP-DA-VPS>:8082)
 EVOLUTION_API_KEY
 MESSAGES_PER_MINUTE     # rate limit do worker (default 20)
 DELAY_BETWEEN_MESSAGES

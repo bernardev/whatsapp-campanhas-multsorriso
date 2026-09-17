@@ -1,8 +1,9 @@
 // scripts/configurar-webhook.ts
 import axios, { AxiosError } from 'axios'
+import { requireEnv } from '../lib/env'
 
-const EVOLUTION_URL = 'http://31.97.42.88:8082'
-const API_KEY = 'apikey321'
+const EVOLUTION_URL = requireEnv('EVOLUTION_API_URL')
+const API_KEY = requireEnv('EVOLUTION_API_KEY')
 const INSTANCE = 'teste-eduardo'
 const WEBHOOK_URL = 'https://b399-2804-7f4-323a-dd4a-911d-30e2-df2d-d756.ngrok-free.app/api/webhooks/evolution'
 
