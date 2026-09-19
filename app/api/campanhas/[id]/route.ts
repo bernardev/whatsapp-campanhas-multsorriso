@@ -1,25 +1,8 @@
 // app/api/campanhas/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { jwtVerify } from 'jose'
 import { MessageStatus } from '@/types/message'
-import { requireEnv } from '@/lib/env'
-
-const SECRET = new TextEncoder().encode(
-  requireEnv('NEXTAUTH_SECRET')
-)
-
-async function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value
-  if (!token) return null
-  
-  try {
-    const { payload } = await jwtVerify(token, SECRET)
-    return payload.userId as string
-  } catch {
-    return null
-  }
-}
+import { getUserIdFromRequest } from '@/lib/auth'
 
 interface MessageWithStatus {
   status: MessageStatus
@@ -30,7 +13,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await getUserFromToken(request)
+  const userId = await getUserIdFromRequest(request)
   if (!userId) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }
@@ -92,7 +75,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await getUserFromToken(request)
+  const userId = await getUserIdFromRequest(request)
   if (!userId) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }
@@ -137,7 +120,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await getUserFromToken(request)
+  const userId = await getUserIdFromRequest(request)
   if (!userId) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }

@@ -1,6 +1,6 @@
 // app/(dashboard)/agenda/page.tsx
 import { redirect } from 'next/navigation'
-import { getUser } from '@/lib/auth'
+import { getVerifiedUser as getUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import AgendaClient from './agenda-client'
 

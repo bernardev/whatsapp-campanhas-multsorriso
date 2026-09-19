@@ -1,25 +1,8 @@
 // app/api/contatos/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { jwtVerify } from 'jose'
 import { z } from 'zod'
-import { requireEnv } from '@/lib/env'
-
-const SECRET = new TextEncoder().encode(
-  requireEnv('NEXTAUTH_SECRET')
-)
-
-async function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value
-  if (!token) return null
-  
-  try {
-    const { payload } = await jwtVerify(token, SECRET)
-    return payload.userId as string
-  } catch {
-    return null
-  }
-}
+import { authorize, getUserIdFromRequest } from '@/lib/auth'
 
 const contatoSchema = z.object({
   name: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres'),
@@ -29,7 +12,7 @@ const contatoSchema = z.object({
 
 // POST - Criar contato individual
 export async function POST(request: NextRequest) {
-  const userId = await getUserFromToken(request)
+  const userId = await getUserIdFromRequest(request)
   if (!userId) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }
@@ -81,12 +64,9 @@ export async function POST(request: NextRequest) {
 
 // DELETE - Deletar contato
 export async function DELETE(request: NextRequest) {
-  const userId = await getUserFromToken(request)
-  if (!userId) {
-    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-  }
-
   try {
+    const auth = await authorize('ADMIN')  // destrutivo: só ADMIN (F4 B2)
+    if (!auth.ok) return auth.response
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 

@@ -1,16 +1,14 @@
 // app/api/admin/usuarios/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 import bcrypt from 'bcrypt'
 
 // GET - Lista todos os usuários
 export async function GET(): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    if (!user || user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
 
     const users = await prisma.user.findMany({
       select: {
@@ -39,10 +37,8 @@ export async function GET(): Promise<NextResponse> {
 // POST - Cria novo usuário
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    if (!user || user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
 
     const body = await request.json()
     const { name, email, password, role } = body

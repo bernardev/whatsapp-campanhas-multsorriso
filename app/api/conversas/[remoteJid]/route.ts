@@ -1,7 +1,7 @@
 // app/api/conversas/[remoteJid]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 import { remoteJidVariants } from '@/lib/phone'
 
 interface RouteContext {
@@ -15,10 +15,9 @@ export async function DELETE(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
+    const user = auth.user
 
     const { remoteJid } = await context.params
     const decodedJid = decodeURIComponent(remoteJid)

@@ -1,6 +1,6 @@
 // app/(dashboard)/contatos/novo/page.tsx
 import { redirect } from 'next/navigation'
-import { getUser } from '@/lib/auth'
+import { getVerifiedUser as getUser } from '@/lib/auth'
 import NovoContatoClient from './novo-contato-client'
 
 export default async function NovoContatoPage() {

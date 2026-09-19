@@ -1,7 +1,7 @@
 // app/api/conversas/[remoteJid]/mensagens/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize, instanceWhere } from '@/lib/caller'
 import { remoteJidVariants } from '@/lib/phone'
 
 interface RouteContext {
@@ -13,10 +13,9 @@ export async function GET(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
+    const auth = await authorize('conversas:ler')
+    if (!auth.ok) return auth.response
+    const { caller } = auth
 
     const { remoteJid } = await context.params
     const decodedJid = decodeURIComponent(remoteJid)
@@ -34,16 +33,16 @@ export async function GET(
     const limit = 50
     const skip = (page - 1) * limit
 
-    // Busca do banco local — filtra pelo remoteJid exato
+    // Busca do banco local — filtra pelas variantes do remoteJid.
+    // F6: token de serviço só vê mensagens das instâncias dele ({} p/ painel).
+    const where = { remoteJid: { in: variants }, ...instanceWhere(caller) }
     const [mensagensRaw, total] = await Promise.all([
       prisma.conversationMessage.findMany({
-        where: { remoteJid: { in: variants } },
+        where,
         orderBy: { timestamp: 'desc' },
         ...(paginate ? { take: limit, skip } : {}),
       }),
-      prisma.conversationMessage.count({
-        where: { remoteJid: { in: variants } },
-      }),
+      prisma.conversationMessage.count({ where }),
     ])
 
     const mensagens = mensagensRaw.map((msg) => ({

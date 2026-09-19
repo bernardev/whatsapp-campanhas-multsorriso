@@ -2,7 +2,11 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+// DELETE fica só-cookie de propósito (F6: o app externo marca, mas não desmarca).
+// authorizeUser = sessão do painel revalidada no banco (F4).
+import { authorize as authorizeUser } from '@/lib/auth'
+import { authorize, canAccessConversation } from '@/lib/caller'
+import { remoteJidVariants } from '@/lib/phone'
 
 interface RouteContext {
   params: Promise<{ remoteJid: string }>
@@ -13,13 +17,20 @@ export async function POST(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    const auth = await authorize('conversas:responder')
+    if (!auth.ok) return auth.response
+    const { caller } = auth
+
+    const { remoteJid: rawJid } = await context.params
+    const remoteJid = decodeURIComponent(rawJid)
+
+    // F6: token de serviço só marca conversa que existe numa instância dele.
+    if (!(await canAccessConversation(caller, remoteJidVariants(remoteJid)))) {
+      return NextResponse.json({ error: 'Conversa não encontrada' }, { status: 404 })
     }
 
-    const { remoteJid } = await context.params
+    // FK para User: token de serviço não é usuário → null
+    const respondedByUserId = caller.kind === 'user' ? caller.id : null
 
     await prisma.conversationResponse.upsert({
       where: { remoteJid },
@@ -27,7 +38,7 @@ export async function POST(
         needsResponse: false,
         notificationRead: true,
         respondedAt: new Date(),
-        respondedByUserId: user.id,
+        respondedByUserId,
         updatedAt: new Date()
       },
       create: {
@@ -36,11 +47,11 @@ export async function POST(
         notificationRead: true,
         lastMessageAt: new Date(),
         respondedAt: new Date(),
-        respondedByUserId: user.id
+        respondedByUserId
       }
     })
 
-    console.log('[Conversas] Marcada como respondida:', remoteJid)
+    console.log(`[Conversas] (${caller.kind}:${caller.name}) Marcada como respondida:`, remoteJid)
 
     return NextResponse.json({ success: true })
   } catch (error) {
@@ -57,11 +68,8 @@ export async function DELETE(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
+    const auth = await authorizeUser()
+    if (!auth.ok) return auth.response
 
     const { remoteJid } = await context.params
 

@@ -349,3 +349,20 @@ enum ReminderStatus {
   SENT
   FAILED
 }
+// ========== TOKENS DE SERVIÇO (apps externos, server-to-server) ==========
+// Ex.: app da Vitória Dental consumindo /api/conversas via
+// "Authorization: Bearer mss_...". O token em claro NUNCA é gravado: só o
+// sha256 (hex). O valor é exibido UMA vez por scripts/criar-service-token.ts.
+model ServiceToken {
+  id          String    @id @default(cuid())
+  name        String                 // ex.: "Vitória Dental"
+  tokenHash   String    @unique      // sha256(token) em hex (64 chars)
+  scopes      String[]               // ex.: ["conversas:ler","conversas:enviar","conversas:responder"]
+  instanceIds String[]               // WhatsAppInstance.id permitidas. Vazio = NENHUMA (fail-closed)
+  active      Boolean   @default(true)
+  lastUsedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([active])
+  @@map("service_tokens")
+}

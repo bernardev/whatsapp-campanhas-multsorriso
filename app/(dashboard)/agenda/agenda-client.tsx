@@ -265,7 +265,12 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
     if (!confirm('Excluir este agendamento?')) return
     setActingId(id)
     try {
-      await fetch(`/api/agenda/${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/agenda/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error || 'Erro ao excluir agendamento')
+        return
+      }
       await carregar()
     } finally {
       setActingId(null)
@@ -487,11 +492,14 @@ export default function AgendaClient({ user, contatos }: AgendaClientProps) {
                               <XCircle className="w-3 h-3 mr-1" /> Cancelar
                             </Button>
                           )}
-                          <Button size="sm" variant="ghost" disabled={actingId === a.id}
-                            onClick={() => excluir(a.id)}
-                            className="h-7 text-xs text-slate-500 hover:text-red-600">
-                            <Trash2 className="w-3 h-3" />
-                          </Button>
+                          {/* Excluir é só de ADMIN (a API responde 403); atendente cancela pelo status. */}
+                          {user.role === 'ADMIN' && (
+                            <Button size="sm" variant="ghost" disabled={actingId === a.id}
+                              onClick={() => excluir(a.id)}
+                              className="h-7 text-xs text-slate-500 hover:text-red-600">
+                              <Trash2 className="w-3 h-3" />
+                            </Button>
+                          )}
                         </div>
                       </div>
                     ))}

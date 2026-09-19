@@ -1,7 +1,8 @@
 // app/api/conversas/route.ts
 import { NextRequest, NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/caller'
 import { canonicalKey, remoteJidVariants, parseCampaign } from '@/lib/phone'
 
 interface Conversa {
@@ -38,17 +39,27 @@ interface NameRow {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser()
+    const auth = await authorize('conversas:ler')
+    if (!auth.ok) return auth.response
+    const { caller } = auth
 
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    // F6: token de serviço só enxerga as instâncias dele. Usuário do painel:
+    // sem filtro (TRUE), exatamente como hoje.
+    const inst = caller.instanceIds
+    if (inst !== null && inst.length === 0) {
+      return NextResponse.json({ conversas: [] })
     }
+    const instFilter =
+      inst === null ? Prisma.sql`TRUE` : Prisma.sql`"instanceId" = ANY(${inst}::text[])`
+    const instFilterCm =
+      inst === null ? Prisma.sql`TRUE` : Prisma.sql`cm."instanceId" = ANY(${inst}::text[])`
 
     // Última mensagem de CADA variante de número (1 linha por remoteJid).
     const lastRows = await prisma.$queryRaw<LastRow[]>`
       SELECT DISTINCT ON ("remoteJid")
         "remoteJid", "messageText", "fromMe", "timestamp"
       FROM "conversation_messages"
+      WHERE ${instFilter}
       ORDER BY "remoteJid", "timestamp" DESC
     `
 
@@ -64,6 +75,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       LEFT JOIN "User" u ON u."id" = c."userId"
       WHERE cm."fromMe" = true
         AND (cm."messageText" LIKE '[template:%' OR cm."messageText" LIKE '▶%')
+        AND ${instFilterCm}
       ORDER BY cm."remoteJid", cm."timestamp" DESC
     `
 
@@ -73,6 +85,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         "remoteJid", "pushName", "timestamp"
       FROM "conversation_messages"
       WHERE "fromMe" = false AND "pushName" IS NOT NULL
+        AND ${instFilter}
       ORDER BY "remoteJid", "timestamp" DESC
     `
 

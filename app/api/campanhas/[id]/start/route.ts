@@ -2,30 +2,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { messageQueue } from '@/lib/queue'
-import { jwtVerify } from 'jose'
-import { requireEnv } from '@/lib/env'
-
-const SECRET = new TextEncoder().encode(
-  requireEnv('NEXTAUTH_SECRET')
-)
-
-async function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value
-  if (!token) return null
-  
-  try {
-    const { payload } = await jwtVerify(token, SECRET)
-    return payload.userId as string
-  } catch {
-    return null
-  }
-}
+import { getUserIdFromRequest } from '@/lib/auth'
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const userId = await getUserFromToken(request)
+  const userId = await getUserIdFromRequest(request)
   if (!userId) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }

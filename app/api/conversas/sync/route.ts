@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 
 const EVOLUTION_URL = process.env.EVOLUTION_API_URL
 const EVOLUTION_KEY = process.env.EVOLUTION_API_KEY
@@ -62,10 +62,8 @@ function extractText(msg: EvolutionMessage, messageType: string): string {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
+    const auth = await authorize()
+    if (!auth.ok) return auth.response
 
     const instances = await prisma.whatsAppInstance.findMany({
       where: { isActive: true, status: { not: 'deleted' } }

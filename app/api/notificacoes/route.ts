@@ -1,7 +1,7 @@
 // app/api/notificacoes/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 
 interface Notificacao {
   id: string
@@ -16,11 +16,8 @@ interface Notificacao {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
+    const auth = await authorize()
+    if (!auth.ok) return auth.response
 
     const now = new Date()
     const notificacoes: Notificacao[] = []

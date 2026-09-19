@@ -1,6 +1,7 @@
 // app/api/campanhas/[id]/stream/route.ts
-import { NextRequest } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { authorize } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -32,10 +33,29 @@ export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> }
 ): Promise<Response> {
+  // Só-cookie: o único cliente (campanhas/[id]/dashboard/dashboard-client.tsx)
+  // é um EventSource de mesma origem, que já envia o cookie auth-token.
+  // Revalidado no banco (F4). Devolve nome e telefone dos contatos: exige login.
+  const auth = await authorize()
+  if (!auth.ok) return auth.response
+
   const { id: campaignId } = await context.params
 
   if (!campaignId) {
     return new Response('Campaign ID is required', { status: 400 })
+  }
+
+  // Só o dono da campanha ou um ADMIN acompanha o dashboard. Checado ANTES
+  // de abrir o stream: 403/404 fecham o EventSource sem loop de reconexão.
+  const owner = await prisma.campaign.findUnique({
+    where: { id: campaignId },
+    select: { userId: true },
+  })
+  if (!owner) {
+    return NextResponse.json({ error: 'Campanha não encontrada' }, { status: 404 })
+  }
+  if (owner.userId !== auth.user.id && auth.user.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'Sem permissão' }, { status: 403 })
   }
 
   const encoder = new TextEncoder()

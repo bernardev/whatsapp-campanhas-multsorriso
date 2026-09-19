@@ -331,6 +331,11 @@ export default function ConversasPage() {
         `/api/conversas/${encodeURIComponent(conversa.remoteJid)}`,
         { method: 'DELETE' }
       )
+      // Excluir conversa é só de ADMIN (a API responde 403 para atendente).
+      if (response.status === 403) {
+        alert('Apenas administradores podem excluir conversas.')
+        return
+      }
       if (!response.ok) throw new Error('Erro ao excluir')
 
       // Sai da conversa e remove da lista

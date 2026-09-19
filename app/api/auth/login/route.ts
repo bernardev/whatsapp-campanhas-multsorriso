@@ -3,11 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcrypt'
 import { SignJWT } from 'jose'
-import { requireEnv } from '@/lib/env'
-
-const SECRET = new TextEncoder().encode(
-  requireEnv('NEXTAUTH_SECRET')
-)
+import { AUTH_COOKIE, JWT_ALG, JWT_SECRET } from '@/lib/auth-secret'
 
 export async function POST(request: NextRequest) {
   try {
@@ -54,9 +50,9 @@ export async function POST(request: NextRequest) {
       name: user.name,
       role: user.role
     })
-      .setProtectedHeader({ alg: 'HS256' })
+      .setProtectedHeader({ alg: JWT_ALG })
       .setExpirationTime('7d')
-      .sign(SECRET)
+      .sign(JWT_SECRET)
 
     // Retorna token
     const response = NextResponse.json({
@@ -69,7 +65,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Seta cookie
-    response.cookies.set('auth-token', token, {
+    response.cookies.set(AUTH_COOKIE, token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',

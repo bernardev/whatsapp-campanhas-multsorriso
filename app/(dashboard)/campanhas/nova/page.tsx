@@ -1,6 +1,6 @@
 // app/(dashboard)/campanhas/nova/page.tsx
 import { redirect } from 'next/navigation'
-import { getUser } from '@/lib/auth'
+import { getVerifiedUser as getUser } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import NovaCampanhaClient from './nova-campanha-client'
 

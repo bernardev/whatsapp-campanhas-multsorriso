@@ -1,6 +1,6 @@
 // app/api/conversas/[remoteJid]/enviar/route.ts
 import { NextRequest, NextResponse } from 'next/server'
-import { getUser } from '@/lib/auth'
+import { authorize, instanceWhere } from '@/lib/caller'
 import { prisma } from '@/lib/prisma'
 
 interface RouteContext {
@@ -16,13 +16,13 @@ export async function POST(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
+    const auth = await authorize('conversas:enviar')
+    if (!auth.ok) return auth.response
+    const { caller } = auth
 
-    const { remoteJid } = await context.params
+    const { remoteJid: rawJid } = await context.params
+    // Idempotente para jids reais (não contêm '%'); alinha com /mensagens.
+    const remoteJid = decodeURIComponent(rawJid)
     const body = await request.json() as SendMessageBody
     const { message } = body
 
@@ -36,10 +36,16 @@ export async function POST(
     let instance = null
 
     const lastMsg = await prisma.conversationMessage.findFirst({
-      where: { remoteJid },
+      where: { remoteJid, ...instanceWhere(caller) },
       orderBy: { timestamp: 'desc' },
       select: { instanceId: true }
     })
+
+    // F6: app externo só responde conversa que JÁ existe numa instância dele
+    // (não inicia conversa nova, não usa conversa de outra clínica).
+    if (caller.kind === 'service' && !lastMsg) {
+      return NextResponse.json({ error: 'Conversa não encontrada' }, { status: 404 })
+    }
 
     if (lastMsg?.instanceId) {
       instance = await prisma.whatsAppInstance.findFirst({
@@ -51,12 +57,13 @@ export async function POST(
       })
     }
 
-    // Fallback: qualquer instância conectada
+    // Fallback: qualquer instância conectada (F6: token de serviço só entre as dele)
     if (!instance) {
       instance = await prisma.whatsAppInstance.findFirst({
         where: {
           status: 'connected',
-          isActive: true
+          isActive: true,
+          ...(caller.instanceIds === null ? {} : { id: { in: caller.instanceIds } })
         },
         orderBy: { createdAt: 'desc' }
       })
@@ -72,7 +79,7 @@ export async function POST(
     const instanceName = instance.instanceKey
     const apiKey = process.env.EVOLUTION_API_KEY
 
-    console.log(`📤 [Send] Enviando para ${remoteJid}: "${message}"`)
+    console.log(`📤 [Send] (${caller.kind}:${caller.name}) Enviando para ${remoteJid}: "${message}"`)
 
     const response = await fetch(`${evolutionUrl}/message/sendText/${instanceName}`, {
       method: 'POST',
@@ -106,7 +113,7 @@ export async function POST(
           remoteJid: remoteJid,
           fromMe: true,
           participant: null,
-          pushName: user.name,
+          pushName: caller.name,
           messageText: message,
           messageType: 'conversation',
           timestamp: new Date(),
@@ -126,7 +133,8 @@ export async function POST(
           needsResponse: false,
           notificationRead: true,
           respondedAt: new Date(),
-          respondedByUserId: user.id
+          // FK para User: token de serviço não é usuário → null
+          respondedByUserId: caller.kind === 'user' ? caller.id : null
         }
       })
     } catch (e) {

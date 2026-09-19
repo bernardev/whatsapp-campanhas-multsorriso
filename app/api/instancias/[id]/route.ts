@@ -2,7 +2,7 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser, requireAdmin } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 import axios from 'axios'
 import { requireEnv } from '@/lib/env'
 
@@ -18,15 +18,8 @@ export async function GET(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    if (user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito a administradores' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
 
     const { id } = await context.params
 
@@ -75,15 +68,8 @@ export async function DELETE(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    if (user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito a administradores' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
 
     const { id } = await context.params
 

@@ -113,17 +113,9 @@ export default function LoginPage() {
               {loading ? 'Entrando...' : 'Entrar'}
             </Button>
 
-            <div className="text-center text-sm text-gray-600 pt-2">
-              Não tem uma conta?{' '}
-              <button
-                type="button"
-                onClick={() => router.push('/register')}
-                className="font-medium hover:underline"
-                style={{ color: '#BD8F29' }}
-              >
-                Cadastre-se
-              </button>
-            </div>
+            <p className="text-center text-sm text-gray-600 pt-2">
+              Não tem acesso? Solicite ao administrador do sistema.
+            </p>
           </form>
         </CardContent>
       </Card>

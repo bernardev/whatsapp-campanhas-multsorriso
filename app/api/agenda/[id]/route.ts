@@ -1,24 +1,8 @@
 // app/api/agenda/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { jwtVerify } from 'jose'
 import { z } from 'zod'
-import { requireEnv } from '@/lib/env'
-
-const SECRET = new TextEncoder().encode(
-  requireEnv('NEXTAUTH_SECRET')
-)
-
-async function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value
-  if (!token) return null
-  try {
-    const { payload } = await jwtVerify(token, SECRET)
-    return payload.userId as string
-  } catch {
-    return null
-  }
-}
+import { authorize, getUserIdFromRequest } from '@/lib/auth'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -36,7 +20,7 @@ const updateSchema = z.object({
 
 // PATCH - Atualiza agendamento (reagendar, mudar status, editar dados)
 export async function PATCH(request: NextRequest, context: RouteContext) {
-  const userId = await getUserFromToken(request)
+  const userId = await getUserIdFromRequest(request)
   if (!userId) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
   }
@@ -102,12 +86,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
 
 // DELETE - Remove o agendamento
 export async function DELETE(request: NextRequest, context: RouteContext) {
-  const userId = await getUserFromToken(request)
-  if (!userId) {
-    return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-  }
-
   try {
+    const auth = await authorize('ADMIN')  // destrutivo: só ADMIN (F4 B2)
+    if (!auth.ok) return auth.response
     const { id } = await context.params
     const existente = await prisma.appointment.findUnique({ where: { id } })
     if (!existente) {

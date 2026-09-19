@@ -1,19 +1,12 @@
 // app/api/admin/monitoramento/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    if (user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito a administradores' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
 
     const { searchParams } = new URL(request.url)
     const days = parseInt(searchParams.get('days') || '30')

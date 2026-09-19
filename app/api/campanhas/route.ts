@@ -1,32 +1,11 @@
 // app/api/campanhas/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { jwtVerify } from 'jose'
-import { requireEnv } from '@/lib/env'
-
-const SECRET = new TextEncoder().encode(
-  requireEnv('NEXTAUTH_SECRET')
-)
-
-// Função helper para pegar usuário do token
-async function getUserFromToken(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value
-  
-  if (!token) {
-    return null
-  }
-
-  try {
-    const { payload } = await jwtVerify(token, SECRET)
-    return payload.userId as string
-  } catch {
-    return null
-  }
-}
+import { getUserIdFromRequest } from '@/lib/auth'
 
 // GET - Listar campanhas do usuário
 export async function GET(request: NextRequest) {
-  const userId = await getUserFromToken(request)
+  const userId = await getUserIdFromRequest(request)
 
   if (!userId) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
@@ -58,7 +37,7 @@ export async function GET(request: NextRequest) {
 
 // POST - Criar nova campanha
 export async function POST(request: NextRequest) {
-  const userId = await getUserFromToken(request)
+  const userId = await getUserIdFromRequest(request)
 
   if (!userId) {
     return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })

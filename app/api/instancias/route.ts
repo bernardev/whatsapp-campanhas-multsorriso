@@ -2,7 +2,7 @@
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser, requireAdmin } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 import axios from 'axios'
 import { requireEnv } from '@/lib/env'
 
@@ -11,15 +11,8 @@ const EVOLUTION_KEY = requireEnv('EVOLUTION_API_KEY')
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    if (user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito a administradores' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
 
     const instances = await prisma.whatsAppInstance.findMany({
       where: { isActive: true },
@@ -38,15 +31,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    if (user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito a administradores' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
+    const user = auth.user
 
     const body = await request.json()
     const { name } = body

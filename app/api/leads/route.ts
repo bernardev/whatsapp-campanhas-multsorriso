@@ -1,7 +1,7 @@
 // app/api/leads/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 
 interface LeadResponse {
   id: string
@@ -26,15 +26,8 @@ interface LeadResponse {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
-
-    if (user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito a administradores' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
 
     // Busca todos os leads
     const leads = await prisma.lead.findMany({

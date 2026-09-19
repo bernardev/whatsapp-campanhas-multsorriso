@@ -1,6 +1,6 @@
 // app/(dashboard)/usuarios/page.tsx
 import { redirect } from 'next/navigation'
-import { getUser } from '@/lib/auth'
+import { getVerifiedUser as getUser } from '@/lib/auth'
 import UsuariosClient from './usuarios-client'
 
 export default async function UsuariosPage() {

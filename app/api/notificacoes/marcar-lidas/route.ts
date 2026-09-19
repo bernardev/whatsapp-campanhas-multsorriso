@@ -1,16 +1,13 @@
 // app/api/notificacoes/marcar-lidas/route.ts
 import type { NextRequest } from 'next/server'
 import { NextResponse } from 'next/server'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
+    const auth = await authorize()
+    if (!auth.ok) return auth.response
 
     const body = await request.json()
     const { remoteJids } = body

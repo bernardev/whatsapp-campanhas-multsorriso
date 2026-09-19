@@ -1,7 +1,7 @@
 // app/api/contatos/[id]/desbloquear/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 
 interface RouteContext {
   params: Promise<{ id: string }>
@@ -12,11 +12,8 @@ export async function POST(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    
-    if (!user) {
-      return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
 
     const { id } = await context.params
 

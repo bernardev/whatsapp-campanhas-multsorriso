@@ -1,7 +1,7 @@
 // app/api/admin/usuarios/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { getUser } from '@/lib/auth'
+import { authorize } from '@/lib/auth'
 import bcrypt from 'bcrypt'
 
 interface RouteContext {
@@ -14,14 +14,21 @@ export async function PATCH(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    if (!user || user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
 
     const { id } = await context.params
     const body = await request.json()
     const { name, role, password } = body
+
+    // Com a revalidação no banco, um ADMIN que rebaixa a si mesmo perde o acesso
+    // na hora e pode deixar a clínica sem nenhum ADMIN.
+    if (id === auth.user.id && role === 'USER') {
+      return NextResponse.json(
+        { error: 'Você não pode remover seu próprio acesso de administrador' },
+        { status: 400 }
+      )
+    }
 
     const target = await prisma.user.findUnique({ where: { id } })
     if (!target) {
@@ -61,10 +68,9 @@ export async function DELETE(
   context: RouteContext
 ): Promise<NextResponse> {
   try {
-    const user = await getUser()
-    if (!user || user.role !== 'ADMIN') {
-      return NextResponse.json({ error: 'Acesso restrito' }, { status: 403 })
-    }
+    const auth = await authorize('ADMIN')
+    if (!auth.ok) return auth.response
+    const user = auth.user
 
     const { id } = await context.params
 

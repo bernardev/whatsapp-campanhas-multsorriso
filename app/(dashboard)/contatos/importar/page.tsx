@@ -1,6 +1,6 @@
 // app/(dashboard)/contatos/importar/page.tsx
 import { redirect } from 'next/navigation'
-import { getUser } from '@/lib/auth'
+import { getVerifiedUser as getUser } from '@/lib/auth'
 import ImportarContatosClient from './importar-contatos-client'
 
 export default async function ImportarContatosPage() {

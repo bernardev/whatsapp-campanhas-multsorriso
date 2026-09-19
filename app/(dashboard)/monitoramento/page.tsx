@@ -1,6 +1,6 @@
 // app/(dashboard)/monitoramento/page.tsx
 import { redirect } from 'next/navigation'
-import { getUser } from '@/lib/auth'
+import { getVerifiedUser as getUser } from '@/lib/auth'
 import MonitoramentoClient from './monitoramento-client'
 
 export default async function MonitoramentoPage() {
