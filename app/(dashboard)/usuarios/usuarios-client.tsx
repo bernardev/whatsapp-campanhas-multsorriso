@@ -82,7 +82,7 @@ export default function UsuariosClient({ user }: UsuariosClientProps) {
 
   useEffect(() => {
     loadNotificacoes()
-    const interval = setInterval(loadNotificacoes, 2000)
+    const interval = setInterval(loadNotificacoes, 10000)
     return () => clearInterval(interval)
   }, [])
 

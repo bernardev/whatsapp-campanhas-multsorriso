@@ -28,13 +28,7 @@ import {
   ChevronRight,
   CalendarClock
 } from 'lucide-react'
-import { MessageStatus as PrismaMessageStatus, CampaignStatus } from '@prisma/client'
-
-type MessageStatus = 'PENDING' | 'SENT' | 'DELIVERED' | 'READ' | 'FAILED'
-
-interface Message {
-  status: PrismaMessageStatus
-}
+import { CampaignStatus } from '@prisma/client'
 
 interface Campaign {
   id: string
@@ -45,7 +39,11 @@ interface Campaign {
     messages: number
     contacts: number
   }
-  messages: Message[]
+  // Contado no banco (groupBy), nao mais derivado da lista de mensagens.
+  stats: {
+    enviadas: number
+    entregues: number
+  }
 }
 
 interface DashboardClientProps {
@@ -107,7 +105,7 @@ export default function DashboardClient({ user, stats, campanhas, pagination }: 
   // ✅ ADICIONADO: useEffect para carregar notificações
 useEffect(() => {
   loadNotificacoes()
-  const interval = setInterval(loadNotificacoes, 2000)
+  const interval = setInterval(loadNotificacoes, 10000)
   return () => clearInterval(interval)
 }, [])
 
@@ -234,16 +232,6 @@ useEffect(() => {
     if (diffHours < 24) return `${diffHours}h atrás`
     
     return then.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
-  }
-
-  const calculateStats = (messages: Message[]) => {
-    const enviadas = messages.filter(m => 
-      ['SENT', 'DELIVERED', 'READ'].includes(m.status)
-    ).length
-    const entregues = messages.filter(m => 
-      ['DELIVERED', 'READ'].includes(m.status)
-    ).length
-    return { enviadas, entregues }
   }
 
   return (
@@ -761,7 +749,7 @@ useEffect(() => {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {campanhas.map((campanha) => {
-                    const { enviadas, entregues } = calculateStats(campanha.messages)
+                    const { enviadas, entregues } = campanha.stats
                     const total = campanha._count.messages
                     const taxaEntrega = total > 0 ? Math.round((entregues / total) * 100) : 0
                     

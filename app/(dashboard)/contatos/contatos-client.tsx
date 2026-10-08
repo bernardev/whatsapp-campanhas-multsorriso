@@ -1,7 +1,7 @@
 // app/(dashboard)/contatos/contatos-client.tsx
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -45,14 +45,31 @@ interface ContatosClientProps {
     role: 'ADMIN' | 'USER'
   }
   contatos: Contact[]
+  counts: { ativos: number; blacklist: number; todos: number }
+  totalInicial: number
+  pageSize: number
 }
 
 type TabType = 'all' | 'blacklist'
 
-export default function ContatosClient({ user, contatos }: ContatosClientProps) {
+export default function ContatosClient({
+  user,
+  contatos: contatosIniciais,
+  counts: countsIniciais,
+  totalInicial,
+  pageSize,
+}: ContatosClientProps) {
   const router = useRouter()
   const [searchTerm, setSearchTerm] = useState<string>('')
   const [activeTab, setActiveTab] = useState<TabType>('all')
+  // A lista agora vem paginada do servidor. O estado abaixo espelha a resposta
+  // de GET /api/contatos; a primeira página chega pronta via props.
+  const [contatos, setContatos] = useState<Contact[]>(contatosIniciais)
+  const [counts, setCounts] = useState(countsIniciais)
+  const [total, setTotal] = useState<number>(totalInicial)
+  const [page, setPage] = useState<number>(1)
+  const [carregando, setCarregando] = useState<boolean>(false)
+  const primeiraRenderizacao = useRef<boolean>(true)
   const [unblockingId, setUnblockingId] = useState<string | null>(null)
   const [blockingId, setBlockingId] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -101,7 +118,7 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
       }
 
       setEditingContact(null)
-      router.refresh()
+      await carregar()
     } catch (error) {
       setEditError(error instanceof Error ? error.message : 'Erro ao atualizar contato')
     } finally {
@@ -126,7 +143,7 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
         throw new Error(data.error || 'Erro ao excluir contato')
       }
 
-      router.refresh()
+      await carregar()
     } catch (error) {
       alert(error instanceof Error ? error.message : 'Erro ao excluir contato')
     } finally {
@@ -163,7 +180,7 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
 
       if (!response.ok) throw new Error('Erro ao desbloquear')
 
-      router.refresh()
+      await carregar()
     } catch (error) {
       console.error('Erro ao desbloquear:', error)
       alert('Erro ao desbloquear contato')
@@ -185,7 +202,7 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
 
       if (!response.ok) throw new Error('Erro ao bloquear')
 
-      router.refresh()
+      await carregar()
     } catch (error) {
       console.error('Erro ao bloquear:', error)
       alert('Erro ao bloquear contato')
@@ -194,22 +211,47 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
     }
   }
 
+  // Busca no servidor. Debounce de 350ms para nao disparar a cada tecla.
+  const carregar = useCallback(async (): Promise<void> => {
+    setCarregando(true)
+    try {
+      const qs = new URLSearchParams({
+        tab: activeTab,
+        q: searchTerm,
+        page: String(page),
+      })
+      const res = await fetch(`/api/contatos?${qs.toString()}`)
+      if (!res.ok) throw new Error('falha ao listar')
+      const data = await res.json()
+      setContatos(data.contatos || [])
+      setTotal(data.total || 0)
+      if (data.counts) setCounts(data.counts)
+    } catch (error) {
+      console.error('Erro ao carregar contatos:', error)
+    } finally {
+      setCarregando(false)
+    }
+  }, [activeTab, searchTerm, page])
+
+  useEffect(() => {
+    // A primeira pagina ja veio pronta do servidor.
+    if (primeiraRenderizacao.current) {
+      primeiraRenderizacao.current = false
+      return
+    }
+    const t = setTimeout(carregar, 350)
+    return () => clearTimeout(t)
+  }, [carregar])
+
+  // Trocar de aba ou de busca volta para a primeira pagina.
+  useEffect(() => {
+    setPage(1)
+  }, [activeTab, searchTerm])
+
+  const totalPaginas = Math.max(1, Math.ceil(total / pageSize))
+
+  // O servidor ja devolve filtrado por aba e por busca.
   const contatosFiltrados = contatos
-    .filter((contato: Contact) => {
-      if (activeTab === 'blacklist' && !contato.blacklisted) return false
-      if (activeTab === 'all' && contato.blacklisted) return false
-
-      if (searchTerm) {
-        const search = searchTerm.toLowerCase()
-        return (
-          contato.phone.includes(search) ||
-          contato.name?.toLowerCase().includes(search) ||
-          contato.company?.toLowerCase().includes(search)
-        )
-      }
-
-      return true
-    })
 
   const formatPhone = (phone: string): string => {
     const cleaned = phone.replace(/\D/g, '')
@@ -230,8 +272,8 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
     })
   }
 
-  const blacklistedCount = contatos.filter((c: Contact) => c.blacklisted).length
-  const activeCount = contatos.filter((c: Contact) => !c.blacklisted).length
+  const blacklistedCount = counts.blacklist
+  const activeCount = counts.ativos
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-50">
@@ -343,7 +385,7 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
                 <div>
                   <p className="text-sm text-slate-600 mb-1">Total de Contatos</p>
                   <p className="text-3xl font-bold text-[#1D2748]">
-                    {contatos.length}
+                    {counts.todos}
                   </p>
                 </div>
                 <div className="p-3 rounded-2xl bg-gradient-to-br from-[#BD8F29] to-[#BD8F29]/80">
@@ -543,6 +585,43 @@ export default function ContatosClient({ user, contatos }: ContatosClientProps) 
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* Paginacao: a lista vem de 50 em 50 do servidor */}
+            <div className="flex items-center justify-between gap-4 border-t px-6 py-4">
+              <p className="text-sm text-slate-500">
+                {carregando ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-3 w-3 animate-spin" /> carregando...
+                  </span>
+                ) : (
+                  <>
+                    Mostrando {contatosFiltrados.length} de {total}
+                    {searchTerm ? ' resultados' : ' contatos'}
+                  </>
+                )}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1 || carregando}
+                  onClick={() => setPage((n) => Math.max(1, n - 1))}
+                >
+                  Anterior
+                </Button>
+                <span className="text-sm text-slate-600">
+                  {page} / {totalPaginas}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page >= totalPaginas || carregando}
+                  onClick={() => setPage((n) => Math.min(totalPaginas, n + 1))}
+                >
+                  Proxima
+                </Button>
+              </div>
             </div>
           </Card>
         ) : (

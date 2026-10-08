@@ -53,7 +53,7 @@ export default async function DashboardPage({
   const safePage = Math.min(currentPage, totalPages)
 
   // Busca campanhas do usuário (página atual)
-  const campanhas = await prisma.campaign.findMany({
+  const campanhasRaw = await prisma.campaign.findMany({
     where: { userId: user.id },
     include: {
       _count: {
@@ -61,17 +61,43 @@ export default async function DashboardPage({
           messages: true,
           contacts: true
         }
-      },
-      messages: {
-        select: {
-          status: true
-        }
       }
     },
     orderBy: { createdAt: 'desc' },
     skip: (safePage - 1) * PAGE_SIZE,
     take: PAGE_SIZE
   })
+
+  // Enviadas/entregues por campanha, contadas no banco. Antes a página trazia
+  // TODAS as linhas de mensagem das 10 campanhas só para contar status no
+  // navegador — nas campanhas grandes isso passava de 7.900 registros.
+  const ids = campanhasRaw.map((c) => c.id)
+  const grupos = ids.length
+    ? await prisma.message.groupBy({
+        by: ['campaignId', 'status'],
+        where: { campaignId: { in: ids } },
+        _count: { _all: true },
+      })
+    : []
+
+  const porCampanha = new Map<string, { enviadas: number; entregues: number }>()
+  for (const id of ids) porCampanha.set(id, { enviadas: 0, entregues: 0 })
+  for (const g of grupos) {
+    const acc = porCampanha.get(g.campaignId)
+    if (!acc) continue
+    const n = g._count._all
+    if (g.status === 'SENT' || g.status === 'DELIVERED' || g.status === 'READ') {
+      acc.enviadas += n
+    }
+    if (g.status === 'DELIVERED' || g.status === 'READ') {
+      acc.entregues += n
+    }
+  }
+
+  const campanhas = campanhasRaw.map((c) => ({
+    ...c,
+    stats: porCampanha.get(c.id) ?? { enviadas: 0, entregues: 0 },
+  }))
 
   const stats = {
     totalCampanhas,

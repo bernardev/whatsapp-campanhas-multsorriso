@@ -14,46 +14,51 @@ interface Notificacao {
   timestamp: Date
 }
 
+interface Linha {
+  id: string
+  remoteJid: string
+  lastMessageAt: Date
+  pushName: string | null
+  messageText: string
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const auth = await authorize()
     if (!auth.ok) return auth.response
 
-    const now = new Date()
-    const notificacoes: Notificacao[] = []
+    // Uma consulta só. Antes isto era um N+1: a lista de pendências e, para
+    // cada uma, um findFirst atrás da última mensagem. Com o polling de 10s em
+    // três telas, 50 conversas sem resposta viravam 51 consultas por ciclo.
+    // O LATERAL resolve a última mensagem de cada remoteJid usando o índice
+    // (remoteJid) e devolve tudo de uma vez.
+    const linhas = await prisma.$queryRaw<Linha[]>`
+      SELECT cr."id", cr."remoteJid", cr."lastMessageAt",
+             lm."pushName", lm."messageText"
+      FROM "conversation_responses" cr
+      JOIN LATERAL (
+        SELECT cm."pushName", cm."messageText"
+        FROM "conversation_messages" cm
+        WHERE cm."remoteJid" = cr."remoteJid"
+        ORDER BY cm."timestamp" DESC
+        LIMIT 1
+      ) lm ON TRUE
+      WHERE cr."needsResponse" = TRUE AND cr."notificationRead" = FALSE
+      ORDER BY cr."lastMessageAt" DESC
+    `
 
-    // Busca conversas que precisam de resposta
-    const conversasResponse = await prisma.conversationResponse.findMany({
-      where: {
-        needsResponse: true,
-        notificationRead: false
-      },
-      orderBy: {
-        lastMessageAt: 'desc'
-      }
-    })
-    for (const conv of conversasResponse) {
-      // Busca última mensagem
-      const lastMessage = await prisma.conversationMessage.findFirst({
-        where: { remoteJid: conv.remoteJid },
-        orderBy: { timestamp: 'desc' }
-      })
+    const now = Date.now()
+    const notificacoes: Notificacao[] = linhas.map((l) => {
+      const waitingMinutes = Math.floor(
+        (now - new Date(l.lastMessageAt).getTime()) / 60000
+      )
 
-      if (!lastMessage) continue
-
-      const diffMs = now.getTime() - new Date(conv.lastMessageAt).getTime()
-      const waitingMinutes = Math.floor(diffMs / 60000)
-
-      const phone = conv.remoteJid
+      const phone = l.remoteJid
         .replace('@s.whatsapp.net', '')
         .replace('@g.us', '')
         .replace(/\D/g, '')
 
-      const clientName = lastMessage.pushName || phone
-
-      // Determina o tipo de notificação baseado no tempo
       let type: Notificacao['type'] = 'nova_resposta'
-      
       if (waitingMinutes >= 60) {
         type = 'aguardando_1h'
       } else if (waitingMinutes >= 30) {
@@ -62,17 +67,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         type = 'aguardando_10min'
       }
 
-      notificacoes.push({
-        id: conv.id,
+      return {
+        id: l.id,
         type,
-        clientName,
+        clientName: l.pushName || phone,
         phone,
-        remoteJid: conv.remoteJid,
-        lastMessage: lastMessage.messageText.substring(0, 50),
+        remoteJid: l.remoteJid,
+        lastMessage: (l.messageText || '').substring(0, 50),
         waitingMinutes,
-        timestamp: conv.lastMessageAt
-      })
-    }
+        timestamp: l.lastMessageAt,
+      }
+    })
 
     return NextResponse.json({ notificacoes })
   } catch (error) {
