@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import { useNotificacoes } from '@/lib/use-notificacoes'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import Image from 'next/image'
@@ -70,17 +71,6 @@ interface DashboardClientProps {
 }
 
 // ✅ ADICIONADO: Interface de Notificação
-interface Notificacao {
-  id: string
-  type: 'nova_resposta' | 'aguardando_10min' | 'aguardando_30min' | 'aguardando_1h'
-  clientName: string
-  phone: string
-  remoteJid: string
-  lastMessage: string
-  waitingMinutes: number
-  timestamp: Date
-}
-
 export default function DashboardClient({ user, stats, campanhas, pagination }: DashboardClientProps) {
   const router = useRouter()
   const pathname = usePathname()
@@ -88,27 +78,10 @@ export default function DashboardClient({ user, stats, campanhas, pagination }: 
   const [deletingCampaignId, setDeletingCampaignId] = useState<string | null>(null)
   
   // ✅ ADICIONADO: Estados de notificação
-  const [notificacoes, setNotificacoes] = useState<Notificacao[]>([])
+  const { notificacoes, loadNotificacoes } = useNotificacoes()
   const [showNotifications, setShowNotifications] = useState(false)
 
   // ✅ ADICIONADO: Carregar notificações
-  async function loadNotificacoes() {
-    try {
-      const response = await fetch('/api/notificacoes')
-      const data = await response.json()
-      setNotificacoes(data.notificacoes || [])
-    } catch (error) {
-      console.error('Erro ao carregar notificações:', error)
-    }
-  }
-
-  // ✅ ADICIONADO: useEffect para carregar notificações
-useEffect(() => {
-  loadNotificacoes()
-  const interval = setInterval(loadNotificacoes, 10000)
-  return () => clearInterval(interval)
-}, [])
-
   async function handleLogout(): Promise<void> {
     await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')

@@ -33,9 +33,20 @@ export async function GET(
     const limit = 50
     const skip = (page - 1) * limit
 
+    // ?after=<timestamp da mensagem mais nova que a tela ja tem>: devolve so as
+    // mais novas. O polling de 5s recarregava o historico inteiro da conversa
+    // aberta a cada ciclo. Margem de 2 min para webhook atrasado; a tela
+    // descarta repetidas pelo id.
+    const afterParam = searchParams.get('after')
+    const after = afterParam ? new Date(afterParam) : null
+    const depois =
+      after && !Number.isNaN(after.getTime())
+        ? { timestamp: { gt: new Date(after.getTime() - 120_000) } }
+        : {}
+
     // Busca do banco local — filtra pelas variantes do remoteJid.
     // F6: token de serviço só vê mensagens das instâncias dele ({} p/ painel).
-    const where = { remoteJid: { in: variants }, ...instanceWhere(caller) }
+    const where = { remoteJid: { in: variants }, ...instanceWhere(caller), ...depois }
     const [mensagensRaw, total] = await Promise.all([
       prisma.conversationMessage.findMany({
         where,

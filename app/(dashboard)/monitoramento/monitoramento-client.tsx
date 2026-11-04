@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import { useNotificacoes } from '@/lib/use-notificacoes'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardDescription } from '@/components/ui/card'
 import Image from 'next/image'
@@ -67,17 +68,6 @@ interface MonitoramentoData {
   recentLog: LogEntry[]
 }
 
-interface Notificacao {
-  id: string
-  type: 'nova_resposta' | 'aguardando_10min' | 'aguardando_30min' | 'aguardando_1h'
-  clientName: string
-  phone: string
-  remoteJid: string
-  lastMessage: string
-  waitingMinutes: number
-  timestamp: Date
-}
-
 interface MonitoramentoClientProps {
   user: {
     id: string
@@ -118,18 +108,13 @@ export default function MonitoramentoClient({ user }: MonitoramentoClientProps) 
   const [data, setData] = useState<MonitoramentoData | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedDays, setSelectedDays] = useState(30)
-  const [notificacoes, setNotificacoes] = useState<Notificacao[]>([])
+  const { notificacoes, loadNotificacoes } = useNotificacoes()
   const [showNotifications, setShowNotifications] = useState(false)
 
   useEffect(() => {
     loadData()
   }, [selectedDays])
 
-  useEffect(() => {
-    loadNotificacoes()
-    const interval = setInterval(loadNotificacoes, 10000)
-    return () => clearInterval(interval)
-  }, [])
 
   async function loadData() {
     try {
@@ -143,16 +128,6 @@ export default function MonitoramentoClient({ user }: MonitoramentoClientProps) 
       console.error('Erro ao carregar monitoramento:', error)
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function loadNotificacoes() {
-    try {
-      const response = await fetch('/api/notificacoes')
-      const data = await response.json()
-      setNotificacoes(data.notificacoes || [])
-    } catch (error) {
-      console.error('Erro ao carregar notificações:', error)
     }
   }
 

@@ -19,6 +19,8 @@ interface Conversa {
   messages: never[] // carregadas sob demanda em /api/conversas/[remoteJid]/mensagens
 }
 
+const MARGEM_DELTA_MS = 120_000
+
 interface LastRow {
   remoteJid: string
   messageText: string
@@ -54,12 +56,44 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const instFilterCm =
       inst === null ? Prisma.sql`TRUE` : Prisma.sql`cm."instanceId" = ANY(${inst}::text[])`
 
+    // ?since=<serverTime da resposta anterior>: devolve so as conversas que
+    // mudaram desde entao. A tela faz polling a cada 5s e a lista inteira tem
+    // milhares de conversas (~240 KB comprimido, ~3 MB cru) — era quase todo o
+    // Fast Origin Transfer da Vercel. A margem cobre webhook atrasado; o cliente
+    // mescla por numero canonico, entao repetir conversa nao faz mal.
+    const serverTime = new Date().toISOString()
+    const sinceParam = new URL(request.url).searchParams.get('since')
+    const since = sinceParam ? new Date(sinceParam) : null
+    let jids: string[] | null = null
+    if (since && !Number.isNaN(since.getTime())) {
+      const desde = new Date(since.getTime() - MARGEM_DELTA_MS)
+      const mudou = await prisma.$queryRaw<{ remoteJid: string }[]>`
+        SELECT DISTINCT "remoteJid" FROM "conversation_messages"
+        WHERE "timestamp" > ${desde} AND ${instFilter}
+        UNION
+        SELECT "remoteJid" FROM "conversation_responses"
+        WHERE "updatedAt" > ${desde}
+      `
+      if (mudou.length === 0) {
+        return NextResponse.json({ conversas: [], serverTime, delta: true })
+      }
+      const variantes = new Set<string>()
+      for (const r of mudou) {
+        for (const v of remoteJidVariants(r.remoteJid)) variantes.add(v)
+      }
+      jids = [...variantes]
+    }
+    const jidFilter =
+      jids === null ? Prisma.sql`TRUE` : Prisma.sql`"remoteJid" = ANY(${jids}::text[])`
+    const jidFilterCm =
+      jids === null ? Prisma.sql`TRUE` : Prisma.sql`cm."remoteJid" = ANY(${jids}::text[])`
+
     // Última mensagem de CADA variante de número (1 linha por remoteJid).
     const lastRows = await prisma.$queryRaw<LastRow[]>`
       SELECT DISTINCT ON ("remoteJid")
         "remoteJid", "messageText", "fromMe", "timestamp"
       FROM "conversation_messages"
-      WHERE ${instFilter}
+      WHERE ${instFilter} AND ${jidFilter}
       ORDER BY "remoteJid", "timestamp" DESC
     `
 
@@ -75,7 +109,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       LEFT JOIN "User" u ON u."id" = c."userId"
       WHERE cm."fromMe" = true
         AND (cm."messageText" LIKE '[template:%' OR cm."messageText" LIKE '▶%')
-        AND ${instFilterCm}
+        AND ${instFilterCm} AND ${jidFilterCm}
       ORDER BY cm."remoteJid", cm."timestamp" DESC
     `
 
@@ -85,11 +119,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         "remoteJid", "pushName", "timestamp"
       FROM "conversation_messages"
       WHERE "fromMe" = false AND "pushName" IS NOT NULL
-        AND ${instFilter}
+        AND ${instFilter} AND ${jidFilter}
       ORDER BY "remoteJid", "timestamp" DESC
     `
 
-    const responseStatuses = await prisma.conversationResponse.findMany()
+    const responseStatuses = await prisma.conversationResponse.findMany(
+      jids === null ? undefined : { where: { remoteJid: { in: jids } } }
+    )
     const responseMap = new Map(
       responseStatuses.map(r => [r.remoteJid, r.needsResponse])
     )
@@ -169,8 +205,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     // ===== Resolução de nome: WhatsApp → base de contatos → número =====
     const contactName = new Map<string, string>()
+    const telefones =
+      jids === null
+        ? null
+        : jids.filter(j => !j.includes('@g.us')).map(j => j.replace('@s.whatsapp.net', ''))
     const contacts = await prisma.contact.findMany({
-      where: { name: { not: null } },
+      where: {
+        name: { not: null },
+        ...(telefones ? { phone: { in: telefones } } : {}),
+      },
       select: { phone: true, name: true }
     })
     for (const ct of contacts) {
@@ -192,7 +235,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    return NextResponse.json({ conversas })
+    return NextResponse.json({
+      conversas,
+      serverTime,
+      ...(jids === null ? {} : { delta: true }),
+    })
   } catch (error) {
     console.error('Erro ao buscar conversas:', error)
     return NextResponse.json(

@@ -3,6 +3,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
+import { useNotificacoes } from '@/lib/use-notificacoes'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import Image from 'next/image'
@@ -38,17 +39,6 @@ interface UserData {
   }
 }
 
-interface Notificacao {
-  id: string
-  type: string
-  clientName: string
-  phone: string
-  remoteJid: string
-  lastMessage: string
-  waitingMinutes: number
-  timestamp: Date
-}
-
 interface UsuariosClientProps {
   user: {
     id: string
@@ -67,7 +57,7 @@ export default function UsuariosClient({ user }: UsuariosClientProps) {
   const [editingUser, setEditingUser] = useState<UserData | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [notificacoes, setNotificacoes] = useState<Notificacao[]>([])
+  const { notificacoes, loadNotificacoes } = useNotificacoes()
   const [showNotifications, setShowNotifications] = useState(false)
 
   // Form state
@@ -80,11 +70,6 @@ export default function UsuariosClient({ user }: UsuariosClientProps) {
     loadUsers()
   }, [])
 
-  useEffect(() => {
-    loadNotificacoes()
-    const interval = setInterval(loadNotificacoes, 10000)
-    return () => clearInterval(interval)
-  }, [])
 
   async function loadUsers() {
     try {
@@ -98,16 +83,6 @@ export default function UsuariosClient({ user }: UsuariosClientProps) {
       console.error('Erro ao carregar usuários:', error)
     } finally {
       setLoading(false)
-    }
-  }
-
-  async function loadNotificacoes() {
-    try {
-      const response = await fetch('/api/notificacoes')
-      const data = await response.json()
-      setNotificacoes(data.notificacoes || [])
-    } catch (error) {
-      console.error('Erro ao carregar notificações:', error)
     }
   }
 

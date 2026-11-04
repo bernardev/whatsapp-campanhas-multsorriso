@@ -3,6 +3,7 @@
 
 import { useEffect, useState, useRef, memo } from 'react'
 import { useRouter } from 'next/navigation'
+import { canonicalKey } from '@/lib/phone'
 import { Button } from '@/components/ui/button'
 import {
   MessageSquare,
@@ -30,6 +31,16 @@ interface Message {
   messageType?: string
   mediaUrl?: string | null
   mediaMimeType?: string | null
+}
+
+const CARGA_COMPLETA_MS = 5 * 60_000
+
+// Junta o delta na lista pelo numero canonico (a mesma pessoa pode chegar por
+// outra variante de formato do remoteJid).
+function mesclarConversas(atuais: Conversa[], novas: Conversa[]): Conversa[] {
+  const mapa = new Map(atuais.map((c) => [canonicalKey(c.remoteJid), c]))
+  for (const c of novas) mapa.set(canonicalKey(c.remoteJid), c)
+  return [...mapa.values()]
 }
 
 function isAudioMessage(msg: Message): boolean {
@@ -159,6 +170,11 @@ export default function ConversasPage() {
 
   const selectedConversaRef = useRef<Conversa | null>(null)
   const messagesRef = useRef<Message[]>([])
+  // Incremental: serverTime da ultima resposta e quando foi a ultima carga
+  // completa (a completa reconcilia o que o delta nao ve, ex.: conversa
+  // excluida por outro usuario).
+  const sinceRef = useRef<string | null>(null)
+  const ultimaCargaCompletaRef = useRef<number>(0)
 
   async function syncConversas() {
     try {
@@ -171,7 +187,7 @@ export default function ConversasPage() {
       if (!response.ok) throw new Error(data.error)
 
       setSyncResult(data.message)
-      await loadConversas(true)
+      await loadConversas(true, true)
     } catch (error) {
       console.error('Erro no sync:', error)
       setSyncResult('Erro ao sincronizar. Verifique a instância.')
@@ -240,14 +256,21 @@ export default function ConversasPage() {
   useEffect(() => {
     loadConversas()
 
-    const interval = setInterval(() => {
+    // Aba escondida nao busca nada; ao voltar, atualiza na hora.
+    const tick = (): void => {
+      if (document.visibilityState !== 'visible') return
       loadConversas(true)
       if (selectedConversaRef.current) {
         loadMessages(selectedConversaRef.current.remoteJid, true)
       }
-    }, 5000)
+    }
+    const interval = setInterval(tick, 5000)
+    document.addEventListener('visibilitychange', tick)
 
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', tick)
+    }
   }, [])
 
   async function loadMessages(remoteJid: string, silent = false) {
@@ -258,14 +281,33 @@ export default function ConversasPage() {
         messagesRef.current = []
       }
 
+      // Polling (silent) com mensagens ja na tela: pede so as mais novas que a
+      // ultima exibida. Abrir conversa continua trazendo o historico inteiro.
+      const maisNova = silent ? messagesRef.current[0] : undefined
+      const query = maisNova
+        ? `?after=${encodeURIComponent(new Date(maisNova.timestamp).toISOString())}`
+        : ''
       const response = await fetch(
-        `/api/conversas/${encodeURIComponent(remoteJid)}/mensagens`
+        `/api/conversas/${encodeURIComponent(remoteJid)}/mensagens${query}`
       )
       const data = await response.json()
 
       if (response.ok) {
-        // Só atualiza estado se quantidade de mensagens mudou
-        if (data.mensagens.length !== messagesRef.current.length) {
+        // Trocou de conversa enquanto a busca rodava: descarta.
+        if (silent && selectedConversaRef.current?.remoteJid !== remoteJid) return
+
+        if (maisNova) {
+          const vistos = new Set(messagesRef.current.map((m) => m.id))
+          const novas = (data.mensagens as Message[]).filter((m) => !vistos.has(m.id))
+          if (novas.length > 0) {
+            const juntas = [...novas, ...messagesRef.current].sort(
+              (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+            )
+            messagesRef.current = juntas
+            setMessages(juntas)
+          }
+        } else if (data.mensagens.length !== messagesRef.current.length) {
+          // Só atualiza estado se quantidade de mensagens mudou
           messagesRef.current = data.mensagens
           setMessages(data.mensagens)
         }
@@ -277,18 +319,37 @@ export default function ConversasPage() {
     }
   }
 
-  async function loadConversas(silent = false) {
+  async function loadConversas(silent = false, completa = false) {
     try {
       if (!silent) setLoading(true)
 
-      const response = await fetch('/api/conversas')
+      const precisaCompleta =
+        completa ||
+        !sinceRef.current ||
+        Date.now() - ultimaCargaCompletaRef.current > CARGA_COMPLETA_MS
+      const url = precisaCompleta
+        ? '/api/conversas'
+        : `/api/conversas?since=${encodeURIComponent(sinceRef.current!)}`
+
+      const response = await fetch(url)
       const data = await response.json()
-      setConversas(data.conversas)
+      if (!response.ok || !Array.isArray(data.conversas)) {
+        throw new Error(data.error || 'Erro ao carregar conversas')
+      }
+      sinceRef.current = data.serverTime ?? null
+
+      const recebidas = data.conversas as Conversa[]
+      if (data.delta) {
+        if (recebidas.length === 0) return
+        setConversas((prev) => mesclarConversas(prev, recebidas))
+      } else {
+        ultimaCargaCompletaRef.current = Date.now()
+        setConversas(recebidas)
+      }
 
       if (selectedConversaRef.current) {
-        const updated = data.conversas.find(
-          (c: Conversa) => c.remoteJid === selectedConversaRef.current!.remoteJid
-        )
+        const chave = canonicalKey(selectedConversaRef.current.remoteJid)
+        const updated = recebidas.find((c) => canonicalKey(c.remoteJid) === chave)
         if (updated) setSelectedConversa(updated)
       }
     } catch (error) {

@@ -7,7 +7,6 @@ interface Notificacao {
   id: string
   type: 'nova_resposta' | 'aguardando_10min' | 'aguardando_30min' | 'aguardando_1h'
   clientName: string
-  phone: string
   remoteJid: string
   lastMessage: string
   waitingMinutes: number
@@ -45,6 +44,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ) lm ON TRUE
       WHERE cr."needsResponse" = TRUE AND cr."notificationRead" = FALSE
       ORDER BY cr."lastMessageAt" DESC
+      LIMIT 50
     `
 
     const now = Date.now()
@@ -71,7 +71,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         id: l.id,
         type,
         clientName: l.pushName || phone,
-        phone,
         remoteJid: l.remoteJid,
         lastMessage: (l.messageText || '').substring(0, 50),
         waitingMinutes,
